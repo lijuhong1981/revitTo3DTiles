@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>RevitTo3DTiles</Name>
+    <Assembly>RevitTo3DTiles.dll</Assembly>
+    <AddInId>8F2C41A7-6D53-4E28-9B14-7A0C5D3E6B91</AddInId>
+    <FullClassName>RevitTo3DTiles.Commands.App</FullClassName>
+    <VendorId>PCIT</VendorId>
+    <VendorDescription>Revit模型一键导出3D Tiles</VendorDescription>
+  </AddIn>
+</RevitAddIns>
