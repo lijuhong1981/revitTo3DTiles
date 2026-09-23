@@ -53,18 +53,20 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AppSettings.cs" />
     <Compile Include="Commands\App.cs" />
     <Compile Include="Commands\ExportTo3DTilesCommand.cs" />
     <Compile Include="Extraction\GeometryExtractor.cs" />
-    <Compile Include="Extraction\HierarchyExtractor.cs" />
     <Compile Include="Extraction\MaterialExtractor.cs" />
-    <Compile Include="Extraction\PropertyExtractor.cs" />
+    <Compile Include="Extraction\MetadataCollector.cs" />
     <Compile Include="Extraction\TextureExtractor.cs" />
+    <Compile Include="Models\ElementMetadata.cs" />
     <Compile Include="Models\RevitMeshData.cs" />
     <Compile Include="Output\GltfWriter.cs" />
-    <Compile Include="Output\MetaWriter.cs" />
+    <Compile Include="Output\MetadataWriter.cs" />
     <Compile Include="Pipeline\ConverterLauncher.cs" />
-    <Compile Include="Pipeline\TileExportContext.cs" />
+    <Compile Include="Pipeline\GeoLocation.cs" />
+    <Compile Include="Pipeline\GltfExportContext.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

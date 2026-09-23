@@ -39,8 +39,9 @@ namespace RevitTo3DTiles.Commands
                 "RevitTo3DTiles.Commands.ExportTo3DTilesCommand")
             {
                 ToolTip = "将当前模型导出为 3D Tiles（保留贴图、BIM属性与楼层层级）",
-                LongDescription = "提取几何/材质/贴图/属性/层级，写出 glTF + meta.json，" +
-                                  "调用 modelTo3DTiles 转换为 3D Tiles（b3dm/Draco/纹理图集）。\n" +
+                LongDescription = "提取几何/材质/贴图/元数据（与导出 glTF 共用管线，含实例化去重），" +
+                                  "写出临时 glb + .metadata，调用 modelTo3DTiles 转换为 3D Tiles" +
+                                  "（b3dm/Draco/纹理图集/构件属性表，按项目地理位置定位）。\n" +
                                   "需要 modelTo3DTiles.exe 随插件部署或设置环境变量 MODELTO3DTILES_PATH。"
             };
             panel.AddItem(buttonData);

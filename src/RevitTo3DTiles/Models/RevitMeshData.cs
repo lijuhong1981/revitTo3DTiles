@@ -9,7 +9,7 @@ namespace RevitTo3DTiles.Models
     /// </summary>
     public class RevitElementNode
     {
-        /// <summary>稳定唯一键（Revit UniqueId），作为glTF节点名与meta.json的匹配键</summary>
+        /// <summary>稳定唯一键（Revit UniqueId），作为glTF节点名</summary>
         public string Key { get; set; }
 
         /// <summary>元素名称（用于展示）</summary>
@@ -21,31 +21,16 @@ namespace RevitTo3DTiles.Models
         /// <summary>父节点Key（层级结构，可为null表示顶层）</summary>
         public string ParentKey { get; set; }
 
-        /// <summary>构件类别名（墙/风管/家具等）</summary>
-        public string CategoryName { get; set; }
-
-        /// <summary>类型名</summary>
-        public string TypeName { get; set; }
-
-        /// <summary>所属楼层（标高名），用于层级树与按楼层过滤</summary>
-        public string StoreyName { get; set; }
-
-        /// <summary>参数集（写入meta.json）</summary>
-        public Dictionary<string, string> Parameters { get; set; } = new Dictionary<string, string>();
-
-        /// <summary>世界坐标变换（已含嵌套族的实例变换累积）</summary>
-        public Transform Transform { get; set; } = Transform.Identity;
-
         /// <summary>按材质分组的几何图元</summary>
         public List<RevitPrimitive> Primitives { get; set; } = new List<RevitPrimitive>();
 
-        /// <summary>是否含有有效几何（无几何的构件只进meta.json不进glTF）</summary>
+        /// <summary>是否含有有效几何（无几何的构件不进glTF）</summary>
         public bool HasGeometry { get { return Primitives.Count > 0; } }
     }
 
     /// <summary>
     /// 单一材质下的三角网格。顶点/UV/索引平行数组（非索引展开，索引顺序写入），
-    /// 使用uint32索引以规避旧实现的65535顶点上限。
+    /// 使用uint32索引以规避65535顶点上限。
     /// </summary>
     public class RevitPrimitive
     {
@@ -76,6 +61,67 @@ namespace RevitTo3DTiles.Models
         /// <summary>贴图相对路径（textures/xxx.png），null表示使用BaseColor</summary>
         public string TextureUri { get; set; }
 
+        /// <summary>贴图源文件绝对路径（内嵌模式：不写 textures/，由 GltfWriter 读字节写进 .bin/.glb）</summary>
+        public string TextureSourcePath { get; set; }
+
+        /// <summary>贴图真实世界缩放（英尺/贴图重复一次）。UV 由 face.Project 的英尺制坐标除以此值得"贴图重复次数"。</summary>
+        public double TextureRealWorldScaleU { get; set; } = 1.0;
+        public double TextureRealWorldScaleV { get; set; } = 1.0;
+
         public int VertexCount { get { return Positions.Count / 3; } }
+    }
+
+    /// <summary>
+    /// 可实例化的共享网格：一个族符号的局部坐标几何（未应用实例放置变换），按材质分组。
+    /// 同一符号的所有实例共用这一份几何，靠各自实例的 matrix 放置到世界坐标。
+    /// </summary>
+    public class RevitSharedMesh
+    {
+        /// <summary>族符号 ElementId（分组键，诊断用）</summary>
+        public int SymbolId { get; set; }
+
+        /// <summary>族符号名</summary>
+        public string SymbolName { get; set; }
+
+        /// <summary>按材质分组的几何图元（局部坐标）</summary>
+        public List<RevitPrimitive> Primitives { get; set; } = new List<RevitPrimitive>();
+    }
+
+    /// <summary>共享网格的一个实例：引用共享网格 + 放置变换 + 元素元数据</summary>
+    public class RevitInstance
+    {
+        /// <summary>稳定唯一键（Revit UniqueId），作为glTF节点名</summary>
+        public string Key { get; set; }
+
+        /// <summary>元素名称（用于展示）</summary>
+        public string Name { get; set; }
+
+        /// <summary>元素ID</summary>
+        public int ElementId { get; set; }
+
+        /// <summary>指向 ExtractResult.SharedMeshes 的下标</summary>
+        public int SharedMeshIndex { get; set; }
+
+        /// <summary>4x4 放置变换（glTF列主序，米），含平移/旋转/镜像</summary>
+        public float[] Matrix { get; set; }
+    }
+
+    /// <summary>几何提取结果：唯一构件（每构件一网格）+ 可实例化的共享网格与其实例</summary>
+    public class ExtractResult
+    {
+        /// <summary>唯一构件（系统族/就地族等，世界坐标，一构件一网格）</summary>
+        public List<RevitElementNode> UniqueNodes { get; } = new List<RevitElementNode>();
+
+        /// <summary>共享网格（族符号，局部坐标，每个符号一份）</summary>
+        public List<RevitSharedMesh> SharedMeshes { get; } = new List<RevitSharedMesh>();
+
+        /// <summary>共享网格的实例（每个族实例一条）</summary>
+        public List<RevitInstance> Instances { get; } = new List<RevitInstance>();
+
+        /// <summary>构件元数据（勾选导出元数据时按采集顺序填充，与节点/实例一一对应）</summary>
+        public List<ElementMetadata> Metadata { get; } = new List<ElementMetadata>();
+
+        /// <summary>是否含任何有效几何</summary>
+        public bool HasGeometry { get { return UniqueNodes.Count > 0 || SharedMeshes.Count > 0; } }
     }
 }
