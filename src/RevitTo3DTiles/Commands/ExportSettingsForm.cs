@@ -441,7 +441,7 @@ namespace RevitTo3DTiles.Commands
             using (var form = new System.Windows.Forms.Form())
             {
                 form.Text = "导出 3D Tiles 设置";
-                form.ClientSize = new System.Drawing.Size(1100, 680);
+                form.ClientSize = new System.Drawing.Size(1100, 694);
                 form.FormBorderStyle = FormBorderStyle.FixedDialog;
                 form.MaximizeBox = false;
                 form.MinimizeBox = false;
@@ -538,14 +538,14 @@ namespace RevitTo3DTiles.Commands
                 };
 
                 // ---- 3D Tiles 专属：地理位置（勾选框兼作组标题，勾上即启用经纬度输入） ----
-                var geoGroup = new GroupBox { Text = "", Left = 12, Top = 412, Width = 1076, Height = 68 };
+                var geoGroup = new GroupBox { Text = "", Left = 12, Top = 426, Width = 1076, Height = 68 };
                 // 标题勾选框放在分组框边框线上（表单子控件），实色背景遮住边框线形成"带勾选的组标题"
                 var useGeoCheck = new CheckBox
                 {
                     Text = projectGeo.HasValue
                         ? "地理位置（模型在地球上的放置点）"
                         : "地理位置（项目未设置坐标，勾选后手动输入）",
-                    Left = 24, Top = 402, AutoSize = true,
+                    Left = 24, Top = 416, AutoSize = true,
                     Checked = chosenUseGeo,
                     BackColor = System.Drawing.SystemColors.Control
                 };
@@ -579,18 +579,18 @@ namespace RevitTo3DTiles.Commands
                 var clampCheck = new CheckBox
                 {
                     Text = "自动贴地（忽略海拔，模型底面落在地表）",
-                    Left = 12, Top = 496, Width = 880, AutoSize = true,
+                    Left = 12, Top = 510, Width = 880, AutoSize = true,
                     Checked = chosenClamp,
                     BackColor = System.Drawing.Color.Transparent
                 };
 
                 // ---- 输出目录（tileset.json 所在目录） ----
-                var dirLabel = new Label { Text = "输出目录:", Left = 12, Top = 540, Width = 160 };
+                var dirLabel = new Label { Text = "输出目录:", Left = 12, Top = 554, Width = 160 };
                 var dirBox = new System.Windows.Forms.TextBox
                 {
-                    Left = 12, Top = 568, Width = 920, Height = 32, Text = chosenDir, ReadOnly = true
+                    Left = 12, Top = 582, Width = 920, Height = 32, Text = chosenDir, ReadOnly = true
                 };
-                var browseButton = new Button { Text = "浏览...", Left = 948, Top = 566, Width = 140, Height = 38 };
+                var browseButton = new Button { Text = "浏览...", Left = 948, Top = 580, Width = 140, Height = 38 };
                 browseButton.Click += (s, e) =>
                 {
                     using (var dlg = new System.Windows.Forms.FolderBrowserDialog())
@@ -602,10 +602,10 @@ namespace RevitTo3DTiles.Commands
                     }
                 };
 
-                var okButton = new Button { Text = "导出", Left = 828, Top = 626, Width = 120, Height = 42 };
+                var okButton = new Button { Text = "导出", Left = 828, Top = 640, Width = 120, Height = 42 };
                 var cancelButton = new Button
                 {
-                    Text = "取消", Left = 960, Top = 626, Width = 120, Height = 42,
+                    Text = "取消", Left = 960, Top = 640, Width = 120, Height = 42,
                     DialogResult = DialogResult.Cancel
                 };
                 GeoLocation chosenGeo = null;
