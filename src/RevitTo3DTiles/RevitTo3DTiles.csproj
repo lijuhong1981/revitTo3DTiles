@@ -55,6 +55,9 @@
   <ItemGroup>
     <Compile Include="AppSettings.cs" />
     <Compile Include="Commands\App.cs" />
+    <Compile Include="Commands\ExportGltfCommand.cs" />
+    <Compile Include="Commands\ExportProgressForm.cs" />
+    <Compile Include="Commands\ExportSettingsForm.cs" />
     <Compile Include="Commands\ExportTo3DTilesCommand.cs" />
     <Compile Include="Extraction\GeometryExtractor.cs" />
     <Compile Include="Extraction\MaterialExtractor.cs" />

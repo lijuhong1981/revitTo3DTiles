@@ -4,11 +4,11 @@ using Autodesk.Revit.UI;
 
 namespace RevitTo3DTiles.Commands
 {
-    /// <summary>Revit 应用入口：注册"导出3D Tiles"按钮</summary>
+    /// <summary>Revit 应用入口：注册「导出 glTF」与「导出 3D Tiles」两个按钮</summary>
     public class App : IExternalApplication
     {
         private const string TabName = "模型转换";
-        private const string PanelName = "3D Tiles";
+        private const string PanelName = "模型导出";
 
         public Result OnStartup(UIControlledApplication application)
         {
@@ -32,7 +32,21 @@ namespace RevitTo3DTiles.Commands
             }
 
             string assemblyPath = Assembly.GetExecutingAssembly().Location;
-            var buttonData = new PushButtonData(
+
+            var gltfButton = new PushButtonData(
+                "ExportGltf",
+                "导出\nglTF",
+                assemblyPath,
+                "RevitTo3DTiles.Commands.ExportGltfCommand")
+            {
+                ToolTip = "将当前模型导出为 glTF/glb（保留贴图与实例化去重）",
+                LongDescription = "设置弹窗选择范围/精度/格式后，提取几何/材质/贴图写出 glTF 2.0" +
+                                  "（可选同名 .metadata 记录构件 BIM 属性与导出设置）。\n" +
+                                  "不调用 3D Tiles 转换器。"
+            };
+            panel.AddItem(gltfButton);
+
+            var tilesButton = new PushButtonData(
                 "ExportTo3DTiles",
                 "导出\n3D Tiles",
                 assemblyPath,
@@ -44,7 +58,7 @@ namespace RevitTo3DTiles.Commands
                                   "（b3dm/Draco/纹理图集/构件属性表，按项目地理位置定位）。\n" +
                                   "需要 modelTo3DTiles.exe 随插件部署或设置环境变量 MODELTO3DTILES_PATH。"
             };
-            panel.AddItem(buttonData);
+            panel.AddItem(tilesButton);
             return Result.Succeeded;
         }
 
