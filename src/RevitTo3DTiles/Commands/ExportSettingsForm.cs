@@ -422,7 +422,7 @@ namespace RevitTo3DTiles.Commands
                 ? (double?)Math.Min(1.0, Math.Max(0.0, saved.TriangulateLod))
                 : null;
 
-            // 地理位置初值：项目 SiteLocation 自动读取；无有效坐标时默认不勾选
+            // 地理位置初值：项目 SiteLocation 自动读取；无有效坐标时默认不勾选（可手动勾选输入）
             GeoLocation projectGeo = GeoLocation.FromDocument(doc);
             bool chosenUseGeo = saved.TilesUseGeolocation && projectGeo.HasValue;
             string lngText = projectGeo.HasValue ? projectGeo.Longitude.ToString("0.######", CultureInfo.InvariantCulture) : "0";
@@ -441,7 +441,7 @@ namespace RevitTo3DTiles.Commands
             using (var form = new System.Windows.Forms.Form())
             {
                 form.Text = "导出 3D Tiles 设置";
-                form.ClientSize = new System.Drawing.Size(1100, 746);
+                form.ClientSize = new System.Drawing.Size(1100, 680);
                 form.FormBorderStyle = FormBorderStyle.FixedDialog;
                 form.MaximizeBox = false;
                 form.MinimizeBox = false;
@@ -537,35 +537,37 @@ namespace RevitTo3DTiles.Commands
                     BackColor = System.Drawing.Color.Transparent
                 };
 
-                // ---- 3D Tiles 专属：地理位置 ----
-                var geoGroup = new GroupBox { Text = "地理位置（模型在地球上的放置点）", Left = 12, Top = 412, Width = 1076, Height = 128 };
+                // ---- 3D Tiles 专属：地理位置（勾选框兼作组标题，勾上即启用经纬度输入） ----
+                var geoGroup = new GroupBox { Text = "", Left = 12, Top = 412, Width = 1076, Height = 68 };
+                // 标题勾选框放在分组框边框线上（表单子控件），实色背景遮住边框线形成"带勾选的组标题"
                 var useGeoCheck = new CheckBox
                 {
-                    Text = string.Format("使用项目地理位置{0}", projectGeo.HasValue ? "" : "（当前模型未设置坐标）"),
-                    Left = 20, Top = 24, Width = 640, AutoSize = true,
-                    Checked = chosenUseGeo, Enabled = projectGeo.HasValue,
-                    BackColor = System.Drawing.Color.Transparent
+                    Text = projectGeo.HasValue
+                        ? "地理位置（模型在地球上的放置点）"
+                        : "地理位置（项目未设置坐标，勾选后手动输入）",
+                    Left = 24, Top = 402, AutoSize = true,
+                    Checked = chosenUseGeo,
+                    BackColor = System.Drawing.SystemColors.Control
                 };
-                var lngLabel = new Label { Text = "经度(°):", Left = 20, Top = 68, Width = 80 };
+                var lngLabel = new Label { Text = "经度(°):", Left = 20, Top = 28, Width = 80 };
                 var lngBox = new System.Windows.Forms.TextBox
                 {
-                    Left = 104, Top = 62, Width = 170, Text = lngText, Enabled = chosenUseGeo
+                    Left = 104, Top = 22, Width = 170, Text = lngText, Enabled = chosenUseGeo
                 };
-                var latLabel = new Label { Text = "纬度(°):", Left = 300, Top = 68, Width = 80 };
+                var latLabel = new Label { Text = "纬度(°):", Left = 300, Top = 28, Width = 80 };
                 var latBox = new System.Windows.Forms.TextBox
                 {
-                    Left = 384, Top = 62, Width = 170, Text = latText, Enabled = chosenUseGeo
+                    Left = 384, Top = 22, Width = 170, Text = latText, Enabled = chosenUseGeo
                 };
-                var altLabel = new Label { Text = "海拔(米):", Left = 580, Top = 68, Width = 90 };
+                var altLabel = new Label { Text = "海拔(米):", Left = 580, Top = 28, Width = 90 };
                 var altBox = new System.Windows.Forms.TextBox
                 {
-                    Left = 674, Top = 62, Width = 130, Text = altText, Enabled = chosenUseGeo
+                    Left = 674, Top = 22, Width = 130, Text = altText, Enabled = chosenUseGeo
                 };
                 useGeoCheck.CheckedChanged += (s, e) =>
                 {
                     lngBox.Enabled = latBox.Enabled = altBox.Enabled = useGeoCheck.Checked;
                 };
-                geoGroup.Controls.Add(useGeoCheck);
                 geoGroup.Controls.Add(lngLabel);
                 geoGroup.Controls.Add(lngBox);
                 geoGroup.Controls.Add(latLabel);
@@ -577,18 +579,18 @@ namespace RevitTo3DTiles.Commands
                 var clampCheck = new CheckBox
                 {
                     Text = "自动贴地（忽略海拔，模型底面落在地表）",
-                    Left = 12, Top = 556, Width = 880, AutoSize = true,
+                    Left = 12, Top = 496, Width = 880, AutoSize = true,
                     Checked = chosenClamp,
                     BackColor = System.Drawing.Color.Transparent
                 };
 
                 // ---- 输出目录（tileset.json 所在目录） ----
-                var dirLabel = new Label { Text = "输出目录:", Left = 12, Top = 600, Width = 160 };
+                var dirLabel = new Label { Text = "输出目录:", Left = 12, Top = 540, Width = 160 };
                 var dirBox = new System.Windows.Forms.TextBox
                 {
-                    Left = 12, Top = 628, Width = 920, Height = 32, Text = chosenDir, ReadOnly = true
+                    Left = 12, Top = 568, Width = 920, Height = 32, Text = chosenDir, ReadOnly = true
                 };
-                var browseButton = new Button { Text = "浏览...", Left = 948, Top = 626, Width = 140, Height = 38 };
+                var browseButton = new Button { Text = "浏览...", Left = 948, Top = 566, Width = 140, Height = 38 };
                 browseButton.Click += (s, e) =>
                 {
                     using (var dlg = new System.Windows.Forms.FolderBrowserDialog())
@@ -600,10 +602,10 @@ namespace RevitTo3DTiles.Commands
                     }
                 };
 
-                var okButton = new Button { Text = "导出", Left = 828, Top = 686, Width = 120, Height = 42 };
+                var okButton = new Button { Text = "导出", Left = 828, Top = 626, Width = 120, Height = 42 };
                 var cancelButton = new Button
                 {
-                    Text = "取消", Left = 960, Top = 686, Width = 120, Height = 42,
+                    Text = "取消", Left = 960, Top = 626, Width = 120, Height = 42,
                     DialogResult = DialogResult.Cancel
                 };
                 GeoLocation chosenGeo = null;
@@ -677,6 +679,7 @@ namespace RevitTo3DTiles.Commands
                 form.Controls.Add(triTrack);
                 form.Controls.Add(triValue);
                 form.Controls.Add(metaCheck);
+                form.Controls.Add(useGeoCheck);   // 标题勾选框（表单子控件，压在分组框边框线上）
                 form.Controls.Add(geoGroup);
                 form.Controls.Add(clampCheck);
                 form.Controls.Add(dirLabel);
@@ -686,6 +689,7 @@ namespace RevitTo3DTiles.Commands
                 form.Controls.Add(cancelButton);
                 form.AcceptButton = okButton;
                 form.CancelButton = cancelButton;
+                useGeoCheck.BringToFront();       // 确保勾选框渲染在分组框边框之上
 
                 if (form.ShowDialog() != DialogResult.OK)
                     return null;
