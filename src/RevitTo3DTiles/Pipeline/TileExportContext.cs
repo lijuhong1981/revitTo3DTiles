@@ -15,6 +15,9 @@ namespace RevitTo3DTiles.Pipeline
         public long TriangleCount { get; set; }
         public long TextureFileCount { get; set; }
         public int SkippedElementCount { get; set; }
+        public int MaterialCount { get; set; }
+        public int AppearanceAssetCount { get; set; }
+        public int BitmapTextureCount { get; set; }
 
         private readonly StreamWriter _log;
 

@@ -14,6 +14,7 @@ namespace RevitTo3DTiles.Extraction
     {
         public static void Apply(RevitPrimitive primitive, Material material, Document doc, TileExportContext context)
         {
+            context.MaterialCount++;
             if (material == null)
             {
                 primitive.MaterialName = "Default";

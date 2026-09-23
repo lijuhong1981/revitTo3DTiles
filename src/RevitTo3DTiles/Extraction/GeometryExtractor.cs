@@ -28,7 +28,8 @@ namespace RevitTo3DTiles.Extraction
                 DetailLevel = ViewDetailLevel.Fine
             };
 
-            var collector = new FilteredElementCollector(doc).WhereElementIsNotElementType();
+            FilteredElementCollector collector = new FilteredElementCollector(doc).WhereElementIsNotElementType();
+
             foreach (Element element in collector)
             {
                 context.ElementCount++;
@@ -116,7 +117,7 @@ namespace RevitTo3DTiles.Extraction
                 RevitPrimitive primitive = GetOrCreatePrimitive(primitives, material, doc, context);
 
                 Mesh mesh = face.Triangulate();
-                if (mesh == null) continue;
+                if (mesh == null || mesh.NumTriangles == 0) continue;
 
                 // 逐三角形投影到参数域并收集UV，统一求包围盒后归一化到[0,1]
                 var triangles = new List<XYZ[]>();

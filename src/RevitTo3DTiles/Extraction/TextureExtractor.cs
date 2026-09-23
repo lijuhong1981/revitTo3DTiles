@@ -21,7 +21,7 @@ namespace RevitTo3DTiles.Extraction
     {
         public const string TextureFolder = "textures";
 
-        /// <summary>已复制贴图缓存：源路径 → 相对URI（避免重复复制）</summary>
+        /// <summary>已复制贴图缓存：输出目录|源路径 → 相对URI（同一会话不同输出目录需各自复制）</summary>
         private static readonly Dictionary<string, string> CopiedTextures = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
@@ -32,28 +32,36 @@ namespace RevitTo3DTiles.Extraction
         {
             try
             {
-                if (material.AppearanceAssetId == null || material.AppearanceAssetId == ElementId.InvalidElementId)
-                    return null;
-                AppearanceAssetElement assetElement = doc.GetElement(material.AppearanceAssetId) as AppearanceAssetElement;
-                if (assetElement == null)
-                    return null;
-
-                Asset renderingAsset = assetElement.GetRenderingAsset();
+                Asset renderingAsset = GetAppearanceAsset(material, doc);
                 if (renderingAsset == null)
                     return null;
+                context.AppearanceAssetCount++;
 
                 // 递归查找贴图文件路径（外观资产里图片存在名称含bitmap的字符串属性中）
                 string bitmapPath = FindBitmapPath(renderingAsset);
                 if (string.IsNullOrEmpty(bitmapPath) || !File.Exists(bitmapPath))
                     return null;
 
-                return CopyTexture(bitmapPath, context);
+                string uri = CopyTexture(bitmapPath, context);
+                context.BitmapTextureCount++;
+                return uri;
             }
             catch (Exception ex)
             {
                 context.Log(string.Format("贴图提取失败(材质 {0}): {1}", material.Name, ex.Message));
                 return null;
             }
+        }
+
+        /// <summary>取得材质的渲染外观资产（无外观资产或读取失败返回null）</summary>
+        private static Asset GetAppearanceAsset(Material material, Document doc)
+        {
+            if (material.AppearanceAssetId == null || material.AppearanceAssetId == ElementId.InvalidElementId)
+                return null;
+            AppearanceAssetElement assetElement = doc.GetElement(material.AppearanceAssetId) as AppearanceAssetElement;
+            if (assetElement == null)
+                return null;
+            return assetElement.GetRenderingAsset();
         }
 
         /// <summary>
@@ -64,12 +72,7 @@ namespace RevitTo3DTiles.Extraction
         {
             try
             {
-                if (material.AppearanceAssetId == null || material.AppearanceAssetId == ElementId.InvalidElementId)
-                    return null;
-                AppearanceAssetElement assetElement = doc.GetElement(material.AppearanceAssetId) as AppearanceAssetElement;
-                if (assetElement == null)
-                    return null;
-                Asset asset = assetElement.GetRenderingAsset();
+                Asset asset = GetAppearanceAsset(material, doc);
                 if (asset == null)
                     return null;
 
@@ -149,8 +152,9 @@ namespace RevitTo3DTiles.Extraction
         /// <summary>复制贴图文件到输出目录（按内容哈希命名去重）</summary>
         private static string CopyTexture(string sourcePath, TileExportContext context)
         {
+            string cacheKey = context.OutputDirectory + "|" + sourcePath;
             string cached;
-            if (CopiedTextures.TryGetValue(sourcePath, out cached))
+            if (CopiedTextures.TryGetValue(cacheKey, out cached))
                 return cached;
 
             byte[] content = File.ReadAllBytes(sourcePath);
@@ -175,7 +179,7 @@ namespace RevitTo3DTiles.Extraction
                 context.Log(string.Format("贴图写出: {0} ({1}KB)", relativeUri, content.Length / 1024));
             }
 
-            CopiedTextures[sourcePath] = relativeUri;
+            CopiedTextures[cacheKey] = relativeUri;
             return relativeUri;
         }
     }

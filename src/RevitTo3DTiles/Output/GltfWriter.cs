@@ -129,6 +129,8 @@ namespace RevitTo3DTiles.Output
 
             context.Log(string.Format("glTF写出完成: 节点 {0} 个, 网格 {1} 个, 材质 {2} 个, 贴图 {3} 个, 二进制 {4}MB",
                 gltfNodes.Count, meshes.Count, materials.Count, images.Count, binary.Length / 1048576));
+            context.Log(string.Format("材质贴图诊断: 处理材质 {0} 个, 含渲染外观资产 {1} 个, 含位图贴图 {2} 个",
+                context.MaterialCount, context.AppearanceAssetCount, context.BitmapTextureCount));
         }
 
         /// <summary>材质去重并生成glTF材质定义（含baseColorTexture引用）</summary>
