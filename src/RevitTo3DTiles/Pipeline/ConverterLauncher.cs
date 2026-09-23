@@ -51,11 +51,11 @@ namespace RevitTo3DTiles.Pipeline
         /// <summary>
         /// 执行转换。inputPath为glTF/glb；geoLocation非空且有效时传-lla定位；
         /// metadataPath非空时传--md写入构件属性表；转换器输出的3DTiles落在outputDirectory。
+        /// 瓦片拆分固定为 material（按材质装填，体积最小加载最快）。
         /// 等待期间轮询取消（取消时杀掉转换进程并返回Cancelled），并泵消息保持进度窗响应。
         /// </summary>
         public static Result Run(string inputPath, string metadataPath, string outputDirectory,
-            GeoLocation geoLocation, bool clampToGround, bool splitSpatial,
-            GltfExportContext context)
+            GeoLocation geoLocation, bool clampToGround, GltfExportContext context)
         {
             string converterPath = ResolveConverterPath();
             var result = new Result { ConverterPath = converterPath };
@@ -71,7 +71,7 @@ namespace RevitTo3DTiles.Pipeline
                 arguments.Append(" --lla \"").Append(geoLocation.ToArgument()).Append("\"");
             arguments.Append(" --cc");
             arguments.Append(clampToGround ? " --ctg" : " --no-ctg");
-            arguments.Append(splitSpatial ? " -s spatial" : " -s material");
+            arguments.Append(" -s material");
 
             context.Log("调用转换器: " + converterPath);
             context.Log("参数: " + arguments);

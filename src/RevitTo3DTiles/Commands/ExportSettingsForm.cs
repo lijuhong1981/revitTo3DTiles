@@ -43,7 +43,6 @@ namespace RevitTo3DTiles.Commands
         public bool TilesExportMetadata = true;
         public GeoLocation GeoLocation;
         public bool TilesClampToGround;
-        public bool TilesSplitSpatial;
     }
 
     /// <summary>
@@ -438,12 +437,11 @@ namespace RevitTo3DTiles.Commands
             }
             bool chosenMeta = saved.TilesExportMetadata;
             bool chosenClamp = saved.TilesClampToGround;
-            bool chosenSpatial = saved.TilesSplitSpatial;
 
             using (var form = new System.Windows.Forms.Form())
             {
                 form.Text = "导出 3D Tiles 设置";
-                form.ClientSize = new System.Drawing.Size(1100, 732);
+                form.ClientSize = new System.Drawing.Size(1100, 746);
                 form.FormBorderStyle = FormBorderStyle.FixedDialog;
                 form.MaximizeBox = false;
                 form.MinimizeBox = false;
@@ -530,17 +528,17 @@ namespace RevitTo3DTiles.Commands
                     triValue.Text = chosenTri.Value.ToString("0.00", CultureInfo.InvariantCulture);
                 };
 
-                // ---- 3D Tiles 专属：BIM 属性 ----
+                // ---- 3D Tiles 专属：BIM 属性（高DPI下TrackBar实际高约80px，需留足间距） ----
                 var metaCheck = new CheckBox
                 {
                     Text = "写入 BIM 属性到瓦片（构件拾取 / 按楼层与类别过滤）",
-                    Left = 12, Top = 356, Width = 880, AutoSize = true,
+                    Left = 12, Top = 376, Width = 880, AutoSize = true,
                     Checked = chosenMeta,
                     BackColor = System.Drawing.Color.Transparent
                 };
 
                 // ---- 3D Tiles 专属：地理位置 ----
-                var geoGroup = new GroupBox { Text = "地理位置（模型在地球上的放置点）", Left = 12, Top = 388, Width = 1076, Height = 128 };
+                var geoGroup = new GroupBox { Text = "地理位置（模型在地球上的放置点）", Left = 12, Top = 412, Width = 1076, Height = 128 };
                 var useGeoCheck = new CheckBox
                 {
                     Text = string.Format("使用项目地理位置{0}", projectGeo.HasValue ? "" : "（当前模型未设置坐标）"),
@@ -575,29 +573,22 @@ namespace RevitTo3DTiles.Commands
                 geoGroup.Controls.Add(altLabel);
                 geoGroup.Controls.Add(altBox);
 
-                // ---- 3D Tiles 专属：贴地与拆分 ----
+                // ---- 3D Tiles 专属：贴地 ----
                 var clampCheck = new CheckBox
                 {
                     Text = "自动贴地（忽略海拔，模型底面落在地表）",
-                    Left = 12, Top = 528, Width = 880, AutoSize = true,
+                    Left = 12, Top = 556, Width = 880, AutoSize = true,
                     Checked = chosenClamp,
-                    BackColor = System.Drawing.Color.Transparent
-                };
-                var spatialCheck = new CheckBox
-                {
-                    Text = "空间切分 + LOD 层级（大场景漫游剔除；体积约 4 倍）",
-                    Left = 12, Top = 564, Width = 880, AutoSize = true,
-                    Checked = chosenSpatial,
                     BackColor = System.Drawing.Color.Transparent
                 };
 
                 // ---- 输出目录（tileset.json 所在目录） ----
-                var dirLabel = new Label { Text = "输出目录:", Left = 12, Top = 606, Width = 160 };
+                var dirLabel = new Label { Text = "输出目录:", Left = 12, Top = 600, Width = 160 };
                 var dirBox = new System.Windows.Forms.TextBox
                 {
-                    Left = 12, Top = 634, Width = 920, Height = 32, Text = chosenDir, ReadOnly = true
+                    Left = 12, Top = 628, Width = 920, Height = 32, Text = chosenDir, ReadOnly = true
                 };
-                var browseButton = new Button { Text = "浏览...", Left = 948, Top = 632, Width = 140, Height = 38 };
+                var browseButton = new Button { Text = "浏览...", Left = 948, Top = 626, Width = 140, Height = 38 };
                 browseButton.Click += (s, e) =>
                 {
                     using (var dlg = new System.Windows.Forms.FolderBrowserDialog())
@@ -609,10 +600,10 @@ namespace RevitTo3DTiles.Commands
                     }
                 };
 
-                var okButton = new Button { Text = "导出", Left = 828, Top = 680, Width = 120, Height = 42 };
+                var okButton = new Button { Text = "导出", Left = 828, Top = 686, Width = 120, Height = 42 };
                 var cancelButton = new Button
                 {
-                    Text = "取消", Left = 960, Top = 680, Width = 120, Height = 42,
+                    Text = "取消", Left = 960, Top = 686, Width = 120, Height = 42,
                     DialogResult = DialogResult.Cancel
                 };
                 GeoLocation chosenGeo = null;
@@ -666,7 +657,6 @@ namespace RevitTo3DTiles.Commands
                     toSave.TilesExportMetadata = metaCheck.Checked;
                     toSave.TilesUseGeolocation = useGeoCheck.Checked;
                     toSave.TilesClampToGround = clampCheck.Checked;
-                    toSave.TilesSplitSpatial = spatialCheck.Checked;
                     if (chosenGeo != null)
                     {
                         toSave.TilesLongitude = chosenGeo.Longitude;
@@ -689,7 +679,6 @@ namespace RevitTo3DTiles.Commands
                 form.Controls.Add(metaCheck);
                 form.Controls.Add(geoGroup);
                 form.Controls.Add(clampCheck);
-                form.Controls.Add(spatialCheck);
                 form.Controls.Add(dirLabel);
                 form.Controls.Add(dirBox);
                 form.Controls.Add(browseButton);
@@ -708,8 +697,7 @@ namespace RevitTo3DTiles.Commands
                     TriangulateLod = chosenTri,
                     TilesExportMetadata = metaCheck.Checked,
                     GeoLocation = chosenGeo,
-                    TilesClampToGround = clampCheck.Checked,
-                    TilesSplitSpatial = spatialCheck.Checked
+                    TilesClampToGround = clampCheck.Checked
                 };
                 if (!ResolveScope(uiDocument, doc, scopeChoice, result))
                     return null;

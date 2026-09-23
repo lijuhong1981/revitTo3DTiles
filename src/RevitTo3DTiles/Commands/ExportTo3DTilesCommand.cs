@@ -96,9 +96,8 @@ namespace RevitTo3DTiles.Commands
                         context.Log(string.Format("地理位置: {0}", settings.GeoLocation.ToArgument()));
                     else
                         context.Log("地理位置: 未启用（转换器使用默认坐标定位）");
-                    context.Log(string.Format("贴地: {0} | 拆分: {1}",
-                        settings.TilesClampToGround ? "是" : "否",
-                        settings.TilesSplitSpatial ? "spatial+LOD" : "material"));
+                    context.Log(string.Format("贴地: {0} | 拆分: material（按材质装填）",
+                        settings.TilesClampToGround ? "是" : "否"));
 
                     // 2. 提取（与 glTF 导出共用管线：实例化去重/真实世界缩放UV/外观贴图）
                     ExtractResult result = null;
@@ -174,8 +173,7 @@ namespace RevitTo3DTiles.Commands
                             progress.SetIndeterminate("正在转换 3D Tiles（Draco/纹理图集/属性表），可取消…");
                             ConverterLauncher.Result convert = ConverterLauncher.Run(
                                 glbPath, effectiveMetadataPath, outputDirectory,
-                                settings.GeoLocation, settings.TilesClampToGround, settings.TilesSplitSpatial,
-                                context);
+                                settings.GeoLocation, settings.TilesClampToGround, context);
 
                             if (convert.Cancelled)
                             {

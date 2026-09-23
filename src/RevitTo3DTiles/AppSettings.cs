@@ -33,7 +33,6 @@ namespace RevitTo3DTiles
             public double TilesLatitude { get; set; }
             public double TilesAltitude { get; set; }               // 米
             public bool TilesClampToGround { get; set; } = false;   // 自动贴地（--ctg）
-            public bool TilesSplitSpatial { get; set; } = false;    // -s spatial（大场景空间切分+LOD）
         }
 
         private static Settings _cached;

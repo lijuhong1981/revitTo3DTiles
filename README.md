@@ -78,7 +78,6 @@ msbuild revitTo3DTiles.sln -p:Configuration=Release
    - **写入 BIM 属性到瓦片**：构件拾取 / 按楼层与类别过滤（默认开）
    - **地理位置**：自动读取项目场地位置（管理 → 地理位置），可手改经纬度与海拔；未设置的模型可关闭，转换器落默认坐标
    - **自动贴地**：模型底面贴地表（忽略海拔）
-   - **空间切分 + LOD**：大场景漫游剔除（体积约 4 倍；默认按材质装填，体积最小加载最快）
 2. 等待 提取 → 写出 → 转换 三阶段完成（转换阶段可取消，会终止转换进程）
 3. 统计弹窗显示构件数 / 三角形数 / 实例化节省 / 输出体积
 
@@ -98,7 +97,7 @@ msbuild revitTo3DTiles.sln -p:Configuration=Release
 
 - `--md <path>`：BIM 语义 sidecar（`.metadata`，Elements 数组，Key 与 glTF 节点 `extras.uniqueId` 对应）→ 瓦片内 `EXT_structural_metadata` 七列属性表（name/elementId/category/family/type/storey/parameters）
 - `--lla "lng,lat,alt"`：度/米制地理定位 → 根节点 ENU→ECEF 变换；**必须双横线**（单横线 `-lla` 会被 yargs 当短旗标簇静默忽略）
-- `--cc`：锚点修正到包围盒中心；`--ctg/--no-ctg`：贴地；`-s material|spatial`：瓦片拆分方式
+- `--cc`：锚点修正到包围盒中心；`--ctg/--no-ctg`：贴地；`-s material`：瓦片按材质装填（固定值，体积最小加载最快）
 - glTF 输入按 Y-up 处理（GltfWriter 的 Y-up 根节点方案正好匹配）；共享网格+实例节点会被转换器自动坍缩为 `EXT_mesh_gpu_instancing`（≥4 个刚体实例）
 
 ## .metadata 格式
