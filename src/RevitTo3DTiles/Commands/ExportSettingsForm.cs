@@ -403,12 +403,318 @@ namespace RevitTo3DTiles.Commands
         }
 
         // ==========================================================================================
-        // 3D Tiles 模式：阶段3接入（地理定位/贴地/拆分/BIM属性开关）
+        // 3D Tiles 模式：公共区（范围/精度）与 glTF 相同，专属区为地理定位与转换选项；
+        // 输出为目录（tileset.json 所在目录），无文件名一行。
         // ==========================================================================================
 
         private static ExportSettings ShowTiles3D(UIDocument uiDocument, Document doc)
         {
-            throw new NotSupportedException("3D Tiles 设置弹窗在阶段3接入。");
+            string projectName = ProjectNameOf(doc);
+
+            AppSettings.Settings saved = AppSettings.Load();
+            string chosenDir = (!string.IsNullOrWhiteSpace(saved.LastOutputDirectory) && Directory.Exists(saved.LastOutputDirectory))
+                ? saved.LastOutputDirectory
+                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), projectName + "_3dtiles");
+
+            int scopeChoice = saved.Scope;
+            if (scopeChoice < 0 || scopeChoice > 2) scopeChoice = 1;
+            ViewDetailLevel chosenDetail = ParseDetail(saved.DetailLevel);
+            double? chosenTri = saved.UseCustomTriangulate
+                ? (double?)Math.Min(1.0, Math.Max(0.0, saved.TriangulateLod))
+                : null;
+
+            // 地理位置初值：项目 SiteLocation 自动读取；无有效坐标时默认不勾选
+            GeoLocation projectGeo = GeoLocation.FromDocument(doc);
+            bool chosenUseGeo = saved.TilesUseGeolocation && projectGeo.HasValue;
+            string lngText = projectGeo.HasValue ? projectGeo.Longitude.ToString("0.######", CultureInfo.InvariantCulture) : "0";
+            string latText = projectGeo.HasValue ? projectGeo.Latitude.ToString("0.######", CultureInfo.InvariantCulture) : "0";
+            string altText = projectGeo.HasValue ? projectGeo.Altitude.ToString("0.##", CultureInfo.InvariantCulture) : "0";
+            if (saved.TilesUseGeolocation && !double.IsNaN(saved.TilesLongitude) && saved.TilesLongitude != 0)
+            {
+                // 上次手改过的覆盖值优先回填
+                lngText = saved.TilesLongitude.ToString("0.######", CultureInfo.InvariantCulture);
+                latText = saved.TilesLatitude.ToString("0.######", CultureInfo.InvariantCulture);
+                altText = saved.TilesAltitude.ToString("0.##", CultureInfo.InvariantCulture);
+            }
+            bool chosenMeta = saved.TilesExportMetadata;
+            bool chosenClamp = saved.TilesClampToGround;
+            bool chosenSpatial = saved.TilesSplitSpatial;
+
+            using (var form = new System.Windows.Forms.Form())
+            {
+                form.Text = "导出 3D Tiles 设置";
+                form.ClientSize = new System.Drawing.Size(1100, 732);
+                form.FormBorderStyle = FormBorderStyle.FixedDialog;
+                form.MaximizeBox = false;
+                form.MinimizeBox = false;
+                form.StartPosition = FormStartPosition.CenterScreen;
+
+                const int RadioHeight = 48;
+
+                // ---- 导出范围（与 glTF 弹窗一致） ----
+                var scopeGroup = new GroupBox { Text = "导出范围", Left = 12, Top = 12, Width = 1076, Height = 118 };
+                var radioFull = new RadioButton
+                {
+                    Text = "全模型（最慢）", Left = 25, Top = 58, Width = 280, Height = RadioHeight, AutoSize = false,
+                    Checked = (scopeChoice == 0),
+                    BackColor = System.Drawing.Color.Transparent
+                };
+                var radioView = new RadioButton
+                {
+                    Text = "当前视图可见（推荐）", Left = 325, Top = 58, Width = 340, Height = RadioHeight, AutoSize = false, Checked = (scopeChoice == 1),
+                    BackColor = System.Drawing.Color.Transparent
+                };
+                var radioSel = new RadioButton
+                {
+                    Text = "仅选中构件（最快）", Left = 690, Top = 58, Width = 380, Height = RadioHeight, AutoSize = false, Checked = (scopeChoice == 2),
+                    BackColor = System.Drawing.Color.Transparent
+                };
+                scopeGroup.Controls.Add(radioFull);
+                scopeGroup.Controls.Add(radioView);
+                scopeGroup.Controls.Add(radioSel);
+
+                // ---- DetailLevel（与 glTF 弹窗一致） ----
+                var detailLabel = new Label { Text = "DetailLevel（视图详细程度）:", Left = 12, Top = 142, Width = 600 };
+                var radioCoarse = new RadioButton
+                {
+                    Text = "Coarse（最粗）", Left = 12, Top = 180, Width = 230, Height = RadioHeight, AutoSize = false,
+                    Checked = (chosenDetail == ViewDetailLevel.Coarse),
+                    BackColor = System.Drawing.Color.Transparent
+                };
+                var radioMedium = new RadioButton
+                {
+                    Text = "Medium（中等）", Left = 262, Top = 180, Width = 230, Height = RadioHeight, AutoSize = false,
+                    Checked = (chosenDetail == ViewDetailLevel.Medium),
+                    BackColor = System.Drawing.Color.Transparent
+                };
+                var radioFine = new RadioButton
+                {
+                    Text = "Fine（最细）", Left = 512, Top = 180, Width = 230, Height = RadioHeight, AutoSize = false, Checked = (chosenDetail == ViewDetailLevel.Fine),
+                    BackColor = System.Drawing.Color.Transparent
+                };
+                radioCoarse.CheckedChanged += (s, e) => { if (radioCoarse.Checked) chosenDetail = ViewDetailLevel.Coarse; };
+                radioMedium.CheckedChanged += (s, e) => { if (radioMedium.Checked) chosenDetail = ViewDetailLevel.Medium; };
+                radioFine.CheckedChanged += (s, e) => { if (radioFine.Checked) chosenDetail = ViewDetailLevel.Fine; };
+
+                // ---- 三角化精度（与 glTF 弹窗一致） ----
+                var useTriCheck = new CheckBox
+                {
+                    Text = "使用自定义三角化精度（不勾选 = Revit 默认，三角形更少、体积更小）",
+                    Left = 12, Top = 248, Width = 880, AutoSize = true, Checked = chosenTri.HasValue
+                };
+                var triTrack = new TrackBar
+                {
+                    Left = 12, Top = 276, Width = 880, Minimum = 0, Maximum = 100,
+                    TickFrequency = 10, SmallChange = 1, LargeChange = 10,
+                    Value = chosenTri.HasValue ? (int)Math.Round(chosenTri.Value * 100) : 100,
+                    TickStyle = TickStyle.None, Enabled = chosenTri.HasValue
+                };
+                var triValue = new Label { Text = TriText(chosenTri), Left = 908, Top = 286, Width = 180 };
+                useTriCheck.CheckedChanged += (s, e) =>
+                {
+                    triTrack.Enabled = useTriCheck.Checked;
+                    if (useTriCheck.Checked)
+                    {
+                        chosenTri = triTrack.Value / 100.0;
+                        triValue.Text = chosenTri.Value.ToString("0.00", CultureInfo.InvariantCulture);
+                    }
+                    else
+                    {
+                        chosenTri = null;
+                        triValue.Text = "default";
+                    }
+                };
+                triTrack.ValueChanged += (s, e) =>
+                {
+                    chosenTri = triTrack.Value / 100.0;
+                    triValue.Text = chosenTri.Value.ToString("0.00", CultureInfo.InvariantCulture);
+                };
+
+                // ---- 3D Tiles 专属：BIM 属性 ----
+                var metaCheck = new CheckBox
+                {
+                    Text = "写入 BIM 属性到瓦片（构件拾取 / 按楼层与类别过滤）",
+                    Left = 12, Top = 356, Width = 880, AutoSize = true,
+                    Checked = chosenMeta,
+                    BackColor = System.Drawing.Color.Transparent
+                };
+
+                // ---- 3D Tiles 专属：地理位置 ----
+                var geoGroup = new GroupBox { Text = "地理位置（模型在地球上的放置点）", Left = 12, Top = 388, Width = 1076, Height = 128 };
+                var useGeoCheck = new CheckBox
+                {
+                    Text = string.Format("使用项目地理位置{0}", projectGeo.HasValue ? "" : "（当前模型未设置坐标）"),
+                    Left = 20, Top = 24, Width = 640, AutoSize = true,
+                    Checked = chosenUseGeo, Enabled = projectGeo.HasValue,
+                    BackColor = System.Drawing.Color.Transparent
+                };
+                var lngLabel = new Label { Text = "经度(°):", Left = 20, Top = 68, Width = 80 };
+                var lngBox = new System.Windows.Forms.TextBox
+                {
+                    Left = 104, Top = 62, Width = 170, Text = lngText, Enabled = chosenUseGeo
+                };
+                var latLabel = new Label { Text = "纬度(°):", Left = 300, Top = 68, Width = 80 };
+                var latBox = new System.Windows.Forms.TextBox
+                {
+                    Left = 384, Top = 62, Width = 170, Text = latText, Enabled = chosenUseGeo
+                };
+                var altLabel = new Label { Text = "海拔(米):", Left = 580, Top = 68, Width = 90 };
+                var altBox = new System.Windows.Forms.TextBox
+                {
+                    Left = 674, Top = 62, Width = 130, Text = altText, Enabled = chosenUseGeo
+                };
+                useGeoCheck.CheckedChanged += (s, e) =>
+                {
+                    lngBox.Enabled = latBox.Enabled = altBox.Enabled = useGeoCheck.Checked;
+                };
+                geoGroup.Controls.Add(useGeoCheck);
+                geoGroup.Controls.Add(lngLabel);
+                geoGroup.Controls.Add(lngBox);
+                geoGroup.Controls.Add(latLabel);
+                geoGroup.Controls.Add(latBox);
+                geoGroup.Controls.Add(altLabel);
+                geoGroup.Controls.Add(altBox);
+
+                // ---- 3D Tiles 专属：贴地与拆分 ----
+                var clampCheck = new CheckBox
+                {
+                    Text = "自动贴地（忽略海拔，模型底面落在地表）",
+                    Left = 12, Top = 528, Width = 880, AutoSize = true,
+                    Checked = chosenClamp,
+                    BackColor = System.Drawing.Color.Transparent
+                };
+                var spatialCheck = new CheckBox
+                {
+                    Text = "空间切分 + LOD 层级（大场景漫游剔除；体积约 4 倍）",
+                    Left = 12, Top = 564, Width = 880, AutoSize = true,
+                    Checked = chosenSpatial,
+                    BackColor = System.Drawing.Color.Transparent
+                };
+
+                // ---- 输出目录（tileset.json 所在目录） ----
+                var dirLabel = new Label { Text = "输出目录:", Left = 12, Top = 606, Width = 160 };
+                var dirBox = new System.Windows.Forms.TextBox
+                {
+                    Left = 12, Top = 634, Width = 920, Height = 32, Text = chosenDir, ReadOnly = true
+                };
+                var browseButton = new Button { Text = "浏览...", Left = 948, Top = 632, Width = 140, Height = 38 };
+                browseButton.Click += (s, e) =>
+                {
+                    using (var dlg = new System.Windows.Forms.FolderBrowserDialog())
+                    {
+                        dlg.Description = "选择 3D Tiles 输出目录";
+                        dlg.SelectedPath = string.IsNullOrEmpty(dirBox.Text) ? chosenDir : dirBox.Text;
+                        if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                            dirBox.Text = dlg.SelectedPath;
+                    }
+                };
+
+                var okButton = new Button { Text = "导出", Left = 828, Top = 680, Width = 120, Height = 42 };
+                var cancelButton = new Button
+                {
+                    Text = "取消", Left = 960, Top = 680, Width = 120, Height = 42,
+                    DialogResult = DialogResult.Cancel
+                };
+                GeoLocation chosenGeo = null;
+                okButton.Click += (s, e) =>
+                {
+                    scopeChoice = radioSel.Checked ? 2 : (radioFull.Checked ? 0 : 1);
+
+                    if (scopeChoice == 2)
+                    {
+                        ICollection<ElementId> selIds = uiDocument.Selection.GetElementIds();
+                        if (selIds.Count == 0)
+                        {
+                            MessageBox.Show(form, "请先选中构件，再选择「仅选中构件」。", "范围为空",
+                                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            return;
+                        }
+                    }
+                    if (string.IsNullOrWhiteSpace(dirBox.Text))
+                    {
+                        MessageBox.Show(form, "请选择输出目录。", "目录为空",
+                            MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                    if (useGeoCheck.Checked)
+                    {
+                        double lng, lat, alt;
+                        if (!double.TryParse(lngBox.Text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out lng)
+                            || !double.TryParse(latBox.Text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out lat)
+                            || !double.TryParse(altBox.Text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out alt)
+                            || lng < -180 || lng > 180 || lat < -90 || lat > 90)
+                        {
+                            MessageBox.Show(form, "地理位置无效：经度 ∈ [-180,180]、纬度 ∈ [-90,90]、海拔为数字（小数点用 . ）。",
+                                "地理位置非法", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                            return;
+                        }
+                        chosenGeo = new GeoLocation { Longitude = lng, Latitude = lat, Altitude = alt, HasValue = true };
+                    }
+                    else
+                    {
+                        chosenGeo = null;
+                    }
+
+                    chosenDir = dirBox.Text;
+                    // 按域保存：公共项 + 3D Tiles 专属项；glTF 域字段原样保留
+                    AppSettings.Settings toSave = AppSettings.Load();
+                    toSave.LastOutputDirectory = chosenDir;
+                    toSave.Scope = scopeChoice;
+                    toSave.DetailLevel = DetailSlug(chosenDetail);
+                    toSave.UseCustomTriangulate = chosenTri.HasValue;
+                    toSave.TriangulateLod = chosenTri ?? 1.0;
+                    toSave.TilesExportMetadata = metaCheck.Checked;
+                    toSave.TilesUseGeolocation = useGeoCheck.Checked;
+                    toSave.TilesClampToGround = clampCheck.Checked;
+                    toSave.TilesSplitSpatial = spatialCheck.Checked;
+                    if (chosenGeo != null)
+                    {
+                        toSave.TilesLongitude = chosenGeo.Longitude;
+                        toSave.TilesLatitude = chosenGeo.Latitude;
+                        toSave.TilesAltitude = chosenGeo.Altitude;
+                    }
+                    AppSettings.Save(toSave);
+                    form.DialogResult = DialogResult.OK;
+                    form.Close();
+                };
+
+                form.Controls.Add(scopeGroup);
+                form.Controls.Add(detailLabel);
+                form.Controls.Add(radioCoarse);
+                form.Controls.Add(radioMedium);
+                form.Controls.Add(radioFine);
+                form.Controls.Add(useTriCheck);
+                form.Controls.Add(triTrack);
+                form.Controls.Add(triValue);
+                form.Controls.Add(metaCheck);
+                form.Controls.Add(geoGroup);
+                form.Controls.Add(clampCheck);
+                form.Controls.Add(spatialCheck);
+                form.Controls.Add(dirLabel);
+                form.Controls.Add(dirBox);
+                form.Controls.Add(browseButton);
+                form.Controls.Add(okButton);
+                form.Controls.Add(cancelButton);
+                form.AcceptButton = okButton;
+                form.CancelButton = cancelButton;
+
+                if (form.ShowDialog() != DialogResult.OK)
+                    return null;
+
+                var result = new ExportSettings
+                {
+                    OutputDirectory = chosenDir,
+                    DetailLevel = chosenDetail,
+                    TriangulateLod = chosenTri,
+                    TilesExportMetadata = metaCheck.Checked,
+                    GeoLocation = chosenGeo,
+                    TilesClampToGround = clampCheck.Checked,
+                    TilesSplitSpatial = spatialCheck.Checked
+                };
+                if (!ResolveScope(uiDocument, doc, scopeChoice, result))
+                    return null;
+                return result;
+            }
         }
 
         // ==========================================================================================

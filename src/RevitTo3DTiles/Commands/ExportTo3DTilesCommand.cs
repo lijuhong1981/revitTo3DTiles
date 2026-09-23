@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Windows.Forms;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
@@ -14,10 +15,12 @@ namespace RevitTo3DTiles.Commands
 {
     /// <summary>
     /// Revit → 3D Tiles 一键导出命令。
-    /// 流程：提取几何/材质/贴图/元数据（与导出 glTF 共用同一条提取管线，含实例化去重）
+    /// 流程：设置弹窗（范围/精度/地理位置/转换选项）
+    /// → 提取几何/材质/贴图/元数据（与导出 glTF 共用同一条提取管线，含实例化去重）
     /// → 写出临时 glb（内嵌贴图，单文件交接最稳）+ .metadata
-    /// → 调用 modelTo3DTiles 转换（--md 属性表 / -lla 项目地理位置 / --cc 锚点修正）
-    /// → 输出 tileset.json + b3dm。临时目录成功后删除，失败时保留便于排查。
+    /// → 调用 modelTo3DTiles 转换（--md 属性表 / --lla 地理位置 / --cc 锚点修正）
+    /// → 输出 tileset.json + b3dm。临时目录成功后删除，失败/取消时保留便于排查。
+    /// 进度三段加权：提取 0~80% / 写出 80~90% / 转换 90~100%（跑马灯 + 转换器日志回显）。
     /// </summary>
     [Transaction(TransactionMode.Manual)]
     [Regeneration(RegenerationOption.Manual)]
@@ -33,45 +36,81 @@ namespace RevitTo3DTiles.Commands
             }
             Document doc = uiDocument.Document;
 
-            // 1. 选择输出目录（默认桌面下 项目名_3dtiles）
-            string outputDirectory = SelectOutputDirectory(doc);
-            if (string.IsNullOrEmpty(outputDirectory))
+            // 1. 设置弹窗（共享组件，Tiles3D 模式）
+            ExportSettings settings = ExportSettingsForm.Show(uiDocument, doc, ExportMode.Tiles3D);
+            if (settings == null)
                 return Result.Cancelled;
 
+            string outputDirectory = settings.OutputDirectory;
             Directory.CreateDirectory(outputDirectory);
             string logPath = Path.Combine(outputDirectory, "3dtiles-export.log");
+
+            // 临时目录先建好并作为提取上下文的输出目录：
+            // 内嵌模式下偶发的"非PNG/JPEG回退外置"贴图会写到 context.OutputDirectory/textures，
+            // 必须与 glb 同目录（转换器按 glb 相对路径解析），不能落进用户输出目录
+            string tempDirectory = Path.Combine(Path.GetTempPath(),
+                "revitTo3DTiles_" + Guid.NewGuid().ToString("N").Substring(0, 8));
+            Directory.CreateDirectory(tempDirectory);
+
+            var detailSettings = new GeometryDetailSettings("3dtiles", settings.DetailLevel, settings.TriangulateLod)
+            {
+                LogProgressEvery = 2000,
+                ExportMetadata = settings.TilesExportMetadata   // .metadata 驱动转换器的构件属性表
+            };
 
             string summaryLine = null;
             string failure = null;
             bool cancelled = false;
-            string tempDirectory = null;
             bool tempKeep = false;      // 失败/取消时保留临时目录供排查
+            double extractSeconds = 0;
+            double writeSeconds = 0;
+            int phase = 0;              // 0=提取(0~80%) 1=写出(80~90%) 2=转换(跑马灯)
 
+            var progress = new ExportProgressForm("导出 3D Tiles");
             try
             {
+                progress.Show();
+                Application.DoEvents();
+
                 using (var log = new StreamWriter(logPath, true, Encoding.UTF8))
                 {
-                    var context = new GltfExportContext(outputDirectory, log)
+                    var context = new GltfExportContext(tempDirectory, log)
                     {
                         // 3D Tiles 管线走临时 glb：贴图内嵌，转换器自行外置去重
-                        SeparateTextures = false
+                        SeparateTextures = false,
+                        OnProgress = (percent, text) =>
+                        {
+                            if (phase == 0) progress.Report(percent * 80 / 100, text);
+                            else if (phase == 1) progress.Report(80 + percent * 10 / 100, text);
+                        },
+                        ShouldCancel = () => progress.Cancelled
                     };
                     context.Log(string.Empty);
                     context.Log(string.Format("===== 导出 3D Tiles: {0} ({1}) =====", doc.Title, doc.PathName));
+                    context.Log(string.Format("范围: {0}", settings.ScopeName));
+                    context.Log(string.Format("精度: Detail={0}, Tri={1}", settings.DetailLevel,
+                        ExportSettingsForm.TriText(settings.TriangulateLod)));
                     context.Log(string.Format("输出目录: {0}", outputDirectory));
-
-                    var settings = new GeometryDetailSettings("3dtiles", ViewDetailLevel.Fine, null)
-                    {
-                        LogProgressEvery = 2000,
-                        ExportMetadata = true     // .metadata 驱动转换器的构件属性表
-                    };
+                    context.Log(string.Format("BIM属性: {0}", settings.TilesExportMetadata ? "写入瓦片属性表" : "不写入"));
+                    if (settings.GeoLocation != null)
+                        context.Log(string.Format("地理位置: {0}", settings.GeoLocation.ToArgument()));
+                    else
+                        context.Log("地理位置: 未启用（转换器使用默认坐标定位）");
+                    context.Log(string.Format("贴地: {0} | 拆分: {1}",
+                        settings.TilesClampToGround ? "是" : "否",
+                        settings.TilesSplitSpatial ? "spatial+LOD" : "material"));
 
                     // 2. 提取（与 glTF 导出共用管线：实例化去重/真实世界缩放UV/外观贴图）
                     ExtractResult result = null;
                     var extractWatch = Stopwatch.StartNew();
                     try
                     {
-                        result = GeometryExtractor.Extract(doc, context, settings, null);
+                        result = GeometryExtractor.Extract(doc, context, detailSettings, settings.ScopeIds);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        cancelled = true;
+                        context.Log("用户取消了导出。");
                     }
                     catch (Exception ex)
                     {
@@ -79,73 +118,94 @@ namespace RevitTo3DTiles.Commands
                         failure = "提取失败：" + ex.Message;
                     }
                     extractWatch.Stop();
+                    extractSeconds = extractWatch.Elapsed.TotalSeconds;
 
-                    if (failure == null && result != null && !result.HasGeometry)
+                    if (!cancelled && failure == null && result != null && !result.HasGeometry)
                     {
-                        context.Log("无几何输出（该模型无可用几何）。");
+                        context.Log("无几何输出（该模型/范围无可用几何）。");
                         failure = "没有提取到任何几何，请调整 DetailLevel 或范围后重试。";
                     }
 
-                    if (failure == null && result != null && result.HasGeometry)
+                    if (!cancelled && failure == null && result != null && result.HasGeometry)
                     {
                         // 3. 写出临时产物：glb（内嵌贴图）+ .metadata
-                        tempDirectory = Path.Combine(Path.GetTempPath(),
-                            "revitTo3DTiles_" + Guid.NewGuid().ToString("N").Substring(0, 8));
-                        Directory.CreateDirectory(tempDirectory);
+                        phase = 1;
                         string glbPath = Path.Combine(tempDirectory, "model.glb");
                         string metadataPath = Path.Combine(tempDirectory, "model.metadata");
 
                         var writeWatch = Stopwatch.StartNew();
-                        GltfWriter.Export(glbPath, result, context, true);
-                        writeWatch.Stop();
-
-                        string effectiveMetadataPath = metadataPath;
                         try
                         {
-                            MetadataWriter.Export(metadataPath, result, context, doc,
-                                "全模型", settings.DetailLevel, null, true);
+                            GltfWriter.Export(glbPath, result, context, true);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            cancelled = true;
+                            context.Log("用户取消了导出。");
                         }
                         catch (Exception ex)
                         {
-                            // 元数据是旁路产物：写出失败不阻断转换，仅少一张属性表
-                            context.Log(string.Format("元数据写出失败(降级为无属性表): {0}", ex.Message));
-                            effectiveMetadataPath = null;
+                            context.Log(string.Format("写出失败: {0}", ex.Message));
+                            failure = "写出失败：" + ex.Message;
                         }
+                        writeWatch.Stop();
+                        writeSeconds = writeWatch.Elapsed.TotalSeconds;
 
-                        // 4. 读取项目地理位置并调用转换器
-                        GeoLocation geo = GeoLocation.FromDocument(doc);
-                        if (geo.HasValue)
-                            context.Log(string.Format("项目地理位置: {0}", geo.ToArgument()));
-                        else
-                            context.Log("项目未设置地理位置，转换器使用默认坐标定位。");
+                        if (!cancelled && failure == null)
+                        {
+                            string effectiveMetadataPath = null;
+                            if (settings.TilesExportMetadata)
+                            {
+                                try
+                                {
+                                    MetadataWriter.Export(metadataPath, result, context, doc,
+                                        settings.ScopeName, settings.DetailLevel, settings.TriangulateLod, true);
+                                    effectiveMetadataPath = metadataPath;
+                                }
+                                catch (Exception ex)
+                                {
+                                    // 元数据是旁路产物：写出失败不阻断转换，仅少一张属性表
+                                    context.Log(string.Format("元数据写出失败(降级为无属性表): {0}", ex.Message));
+                                }
+                            }
 
-                        ConverterLauncher.Result convert = ConverterLauncher.Run(
-                            glbPath, effectiveMetadataPath, outputDirectory, geo, false, false, context);
+                            // 4. 调用转换器（跑马灯进度，取消会终止转换进程）
+                            phase = 2;
+                            progress.SetIndeterminate("正在转换 3D Tiles（Draco/纹理图集/属性表），可取消…");
+                            ConverterLauncher.Result convert = ConverterLauncher.Run(
+                                glbPath, effectiveMetadataPath, outputDirectory,
+                                settings.GeoLocation, settings.TilesClampToGround, settings.TilesSplitSpatial,
+                                context);
 
-                        if (convert.Cancelled)
-                        {
-                            cancelled = true;
-                        }
-                        else if (!convert.Success)
-                        {
-                            failure = (convert.ErrorMessage ?? "未知错误") + "\n详见: " + logPath
-                                + "\n中间产物保留在: " + tempDirectory;
-                            tempKeep = true;
-                        }
-                        else
-                        {
-                            context.Log("导出完成。");
-                            summaryLine = string.Format(
-                                "构件 {0} | 三角形 {1:N0} | 顶点 {2:N0} | 材质 {3} | 贴图 {4} | 提取 {5:0.0}s | 写出 {6:0.0}s",
-                                context.MeshElementCount, context.TriangleCount, context.VertexCount,
-                                context.MaterialCount, context.BitmapTextureCount,
-                                extractWatch.Elapsed.TotalSeconds, writeWatch.Elapsed.TotalSeconds);
-                            if (context.SharedMeshCount > 0)
-                                summaryLine += string.Format(
-                                    "\n实例化: 共享网格 {0} 个 / 实例 {1} 个, 展开三角形 {2:N0} → 去重 {3:N0} (省 {4:0.0}%)",
-                                    context.SharedMeshCount, context.InstanceCount,
-                                    context.ExpandedTriangleCount, context.TriangleCount,
-                                    (1 - (double)context.TriangleCount / Math.Max(1, context.ExpandedTriangleCount)) * 100);
+                            if (convert.Cancelled)
+                            {
+                                cancelled = true;
+                                tempKeep = true;    // 半成品瓦片目录 + 中间产物都留给用户检查
+                            }
+                            else if (!convert.Success)
+                            {
+                                failure = (convert.ErrorMessage ?? "未知错误") + "\n详见: " + logPath
+                                    + "\n中间产物保留在: " + tempDirectory;
+                                tempKeep = true;
+                            }
+                            else
+                            {
+                                context.Log("导出完成。");
+                                long outputBytes = DirectoryBytes(outputDirectory);
+                                summaryLine = string.Format(
+                                    "构件 {0} | 三角形 {1:N0} | 顶点 {2:N0} | 材质 {3} | 贴图 {4} | 输出 {5:0.0}MB | 提取 {6:0.0}s | 写出 {7:0.0}s",
+                                    context.MeshElementCount, context.TriangleCount, context.VertexCount,
+                                    context.MaterialCount, context.BitmapTextureCount,
+                                    outputBytes / 1048576.0, extractSeconds, writeSeconds);
+                                if (context.SharedMeshCount > 0)
+                                    summaryLine += string.Format(
+                                        "\n实例化: 共享网格 {0} 个 / 实例 {1} 个, 展开三角形 {2:N0} → 去重 {3:N0} (省 {4:0.0}%)",
+                                        context.SharedMeshCount, context.InstanceCount,
+                                        context.ExpandedTriangleCount, context.TriangleCount,
+                                        (1 - (double)context.TriangleCount / Math.Max(1, context.ExpandedTriangleCount)) * 100);
+                                if (effectiveMetadataPath == null && settings.TilesExportMetadata)
+                                    summaryLine += "\n元数据: 写出失败，瓦片无 BIM 属性表（详见日志）";
+                            }
                         }
                     }
                 }
@@ -161,13 +221,21 @@ namespace RevitTo3DTiles.Commands
             }
             finally
             {
+                if (!progress.IsDisposed)
+                {
+                    progress.Close();
+                    progress.Dispose();
+                }
                 if (tempDirectory != null && !tempKeep)
                     CleanupTempDirectory(tempDirectory);
             }
 
             if (cancelled)
             {
-                TaskDialog.Show("导出已取消", "已中止导出，未生成完整的 3D Tiles 输出。");
+                TaskDialog.Show("导出已取消",
+                    string.Format("已在提取 {0:0.0}s / 写出 {1:0.0}s 后中止。\n半成品输出与日志: {2}",
+                        extractSeconds, writeSeconds, outputDirectory)
+                    + (tempKeep ? string.Format("\n中间产物保留在: {0}", tempDirectory) : ""));
                 return Result.Cancelled;
             }
             if (failure != null)
@@ -186,18 +254,21 @@ namespace RevitTo3DTiles.Commands
             return Result.Succeeded;
         }
 
-        /// <summary>选择输出目录（默认桌面下的 项目名_3dtiles）</summary>
-        private static string SelectOutputDirectory(Document doc)
+        /// <summary>目录总字节数（统计输出体积用，子目录递归）</summary>
+        private static long DirectoryBytes(string directory)
         {
-            string projectName = Path.GetFileNameWithoutExtension(doc.PathName);
-            if (string.IsNullOrEmpty(projectName)) projectName = doc.Title;
-
-            using (var dialog = new System.Windows.Forms.FolderBrowserDialog())
+            try
             {
-                dialog.Description = "选择 3D Tiles 输出目录";
-                dialog.SelectedPath = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.Desktop), projectName + "_3dtiles");
-                return dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK ? dialog.SelectedPath : null;
+                long bytes = 0;
+                foreach (string file in Directory.GetFiles(directory))
+                    bytes += new FileInfo(file).Length;
+                foreach (string sub in Directory.GetDirectories(directory))
+                    bytes += DirectoryBytes(sub);
+                return bytes;
+            }
+            catch
+            {
+                return 0;
             }
         }
 
