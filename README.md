@@ -47,7 +47,24 @@ msbuild revitTo3DTiles.sln -p:Configuration=Release
 
 ## 安装与部署
 
-1. 将 `bin\Release\RevitTo3DTiles.dll` 复制到：
+### 下载安装（推荐）
+
+无需编译，从 [GitHub Releases](https://github.com/lijuhong1981/revitTo3DTiles/releases) 下载 `revitTo3DTiles-v1.2.0.zip`，解压得到：
+
+- `RevitTo3DTiles.dll`
+- `RevitTo3DTiles.addin`
+- `DracoWrapper.dll`（glTF 的 Draco 几何压缩所需）
+- `modelTo3DTiles.exe`（3D Tiles 导出所需，已含 v2.1.1 版）
+
+将四个文件一起复制到：
+
+```
+C:\ProgramData\Autodesk\Revit\Addins\2020\
+```
+
+### 从源码部署
+
+1. 生成解决方案（见[构建](#构建)），将 `bin\Release\RevitTo3DTiles.dll` 复制到：
    ```
    C:\ProgramData\Autodesk\Revit\Addins\2020\
    ```
