@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using RevitTo3DTiles.Extraction;
 using RevitTo3DTiles.Models;
 using RevitTo3DTiles.Pipeline;
 
@@ -77,7 +78,7 @@ namespace RevitTo3DTiles.Output
                     for (int i = 0; i < result.SharedMeshes.Count; i++)
                     {
                         context.ThrowIfCancelled();
-                        sharedMeshIndex[i] = WriteMesh(binary, result.SharedMeshes[i].Primitives,
+                        sharedMeshIndex[i] = WriteMesh(binary, result.SharedMeshes[i].Primitives, context,
                             bufferViews, accessors, meshes, materials, images, textures,
                             materialIndexMap, textureIndexMap, ref vertexTotal);
                         writtenMeshes++;
@@ -89,7 +90,7 @@ namespace RevitTo3DTiles.Output
                     foreach (RevitElementNode node in result.UniqueNodes)
                     {
                         context.ThrowIfCancelled();
-                        int meshIndex = WriteMesh(binary, node.Primitives,
+                        int meshIndex = WriteMesh(binary, node.Primitives, context,
                             bufferViews, accessors, meshes, materials, images, textures,
                             materialIndexMap, textureIndexMap, ref vertexTotal);
                         gltfNodes.Add(new JObject
@@ -174,6 +175,13 @@ namespace RevitTo3DTiles.Output
                 gltf["samplers"] = samplers;
             }
 
+            // 声明 Draco 扩展（有图元实际压缩时才声明；extensionsRequired：不支持解码的查看器应拒绝加载而非渲染错误）
+            if (context.DracoAnyUsed)
+            {
+                gltf["extensionsUsed"] = new JArray("KHR_draco_mesh_compression");
+                gltf["extensionsRequired"] = new JArray("KHR_draco_mesh_compression");
+            }
+
             try
             {
                 if (asGlb)
@@ -183,7 +191,8 @@ namespace RevitTo3DTiles.Output
                 }
                 else
                 {
-                    File.WriteAllText(gltfPath, gltf.ToString(Formatting.Indented));
+                    // 紧凑 JSON：缩进空白约占 .gltf 体积 30%，查看器与解析器均不需要
+                    File.WriteAllText(gltfPath, gltf.ToString(Formatting.None));
                 }
             }
             catch
@@ -194,12 +203,12 @@ namespace RevitTo3DTiles.Output
 
             context.Log(string.Format("glTF写出完成: 节点 {0} 个, 网格 {1} 个, 材质 {2} 个, 贴图 {3} 个, 顶点 {4:N0} 个, 二进制 {5:0.0}MB",
                 gltfNodes.Count, meshes.Count, materials.Count, images.Count, vertexTotal, binaryLength / 1048576.0));
-            context.Log(string.Format("材质贴图诊断: 处理材质 {0} 个, 含渲染外观资产 {1} 个, 含位图贴图 {2} 个",
-                context.MaterialCount, context.AppearanceAssetCount, context.BitmapTextureCount));
+            context.Log(string.Format("材质贴图诊断: 处理材质 {0} 个, 含渲染外观资产 {1} 个, 含位图贴图 {2} 个, 2的幂归一化 {3} 张",
+                context.MaterialCount, context.AppearanceAssetCount, context.BitmapTextureCount, context.NormalizedTextureCount));
         }
 
         /// <summary>写一个网格（一组图元）的二进制数据与mesh定义，返回mesh索引。顶点数据写完即释放。</summary>
-        private static int WriteMesh(Stream binary, List<RevitPrimitive> primitives,
+        private static int WriteMesh(Stream binary, List<RevitPrimitive> primitives, GltfExportContext context,
             JArray bufferViews, JArray accessors, JArray meshes, JArray materials,
             JArray images, JArray textures, Dictionary<int, int> materialIndexMap,
             Dictionary<string, int> textureIndexMap, ref long vertexTotal)
@@ -209,29 +218,100 @@ namespace RevitTo3DTiles.Output
             {
                 if (primitive.VertexCount == 0) continue;
 
-                int materialIndex = GetMaterialIndex(primitive, materials, materialIndexMap, textures, images, textureIndexMap, binary, bufferViews);
-
-                // 顶点数据：位置 / 法线 / UV / 索引，各bufferView按4字节对齐
-                int positionAccessor = WriteVec3Accessor(binary, bufferViews, accessors, primitive.Positions, true);
-                int normalAccessor = WriteVec3Accessor(binary, bufferViews, accessors, primitive.Normals, false);
-                int uvAccessor = -1;
-                if (primitive.Uvs.Count == primitive.VertexCount * 2)
-                    uvAccessor = WriteVec2Accessor(binary, bufferViews, accessors, primitive.Uvs);
-                int indexAccessor = WriteIndexAccessor(binary, bufferViews, accessors, primitive.Indices);
+                int materialIndex = GetMaterialIndex(primitive, context, materials, materialIndexMap, textures, images, textureIndexMap, binary, bufferViews);
 
                 vertexTotal += primitive.VertexCount;
 
-                var attributes = new JObject { ["POSITION"] = positionAccessor };
-                if (normalAccessor >= 0) attributes["NORMAL"] = normalAccessor;
-                if (uvAccessor >= 0) attributes["TEXCOORD_0"] = uvAccessor;
-
-                primitivesJson.Add(new JObject
+                // Draco 压缩路径：几何编码进独立 bufferView，primitive 以扩展引用，
+                // 不再写裸 attributes/indices。任何失败回退未压缩路径，绝不阻断导出。
+                bool compressed = false;
+                if (context.DracoEnabled && context.DracoFailedCount == 0)
                 {
-                    ["attributes"] = attributes,
-                    ["indices"] = indexAccessor,
-                    ["material"] = materialIndex,
-                    ["mode"] = 4  // TRIANGLES
-                });
+                    if (primitive.Indices.Count / 3 > Native.DracoEncoder.MaxTriangles)
+                    {
+                        // 超大单图元跳过压缩（对齐 modelTo3DTiles 的安全上限），不影响其它图元
+                        if (context.DracoSkippedCount == 0)
+                            context.Log(string.Format("图元三角形 {0:N0} 超出 Draco 上限 {1:N0}，该图元不压缩",
+                                primitive.Indices.Count / 3, (long)Native.DracoEncoder.MaxTriangles));
+                        context.DracoSkippedCount++;
+                    }
+                    else
+                    {
+                        byte[] encoded = Native.DracoEncoder.Encode(
+                            primitive.Positions, primitive.Normals, primitive.Uvs, primitive.Indices);
+                        if (encoded != null)
+                        {
+                            long byteOffset = AlignTo4(binary);
+                            binary.Write(encoded, 0, encoded.Length);
+
+                            // 属性局部下标与包装层添加顺序严格对应：0=POSITION 1=NORMAL 2=TEXCOORD
+                            var extAttributes = new JObject { ["POSITION"] = 0 };
+                            int attrIndex = 1;
+                            if (primitive.Normals.Count == primitive.VertexCount * 3)
+                                extAttributes["NORMAL"] = attrIndex++;
+                            if (primitive.Uvs.Count == primitive.VertexCount * 2)
+                                extAttributes["TEXCOORD_0"] = attrIndex;
+
+                            bufferViews.Add(new JObject
+                            {
+                                ["buffer"] = 0,
+                                ["byteOffset"] = byteOffset,
+                                ["byteLength"] = encoded.Length
+                            });
+
+                            primitivesJson.Add(new JObject
+                            {
+                                ["extensions"] = new JObject
+                                {
+                                    ["KHR_draco_mesh_compression"] = new JObject
+                                    {
+                                        ["bufferView"] = bufferViews.Count - 1,
+                                        ["attributes"] = extAttributes
+                                    }
+                                },
+                                ["material"] = materialIndex,
+                                ["mode"] = 4  // TRIANGLES
+                            });
+
+                            compressed = true;
+                            context.DracoPrimitiveCount++;
+                            context.DracoRawBytes += (long)(primitive.Positions.Count + primitive.Normals.Count
+                                + primitive.Uvs.Count) * 4 + (long)primitive.Indices.Count * 2;
+                            context.DracoCompressedBytes += encoded.Length;
+                            context.DracoAnyUsed = true;
+                        }
+                        else
+                        {
+                            // 熔断：一次编码失败大概率是系统性问题，后续图元全部回退未压缩
+                            context.DracoFailedCount++;
+                            context.Log(string.Format("Draco 编码失败(图元顶点 {0:N0})，后续图元回退未压缩",
+                                primitive.VertexCount));
+                        }
+                    }
+                }
+
+                if (!compressed)
+                {
+                    // 顶点数据：位置 / 法线 / UV / 索引，各bufferView按4字节对齐
+                    int positionAccessor = WriteVec3Accessor(binary, bufferViews, accessors, primitive.Positions, true);
+                    int normalAccessor = WriteVec3Accessor(binary, bufferViews, accessors, primitive.Normals, false);
+                    int uvAccessor = -1;
+                    if (primitive.Uvs.Count == primitive.VertexCount * 2)
+                        uvAccessor = WriteVec2Accessor(binary, bufferViews, accessors, primitive.Uvs);
+                    int indexAccessor = WriteIndexAccessor(binary, bufferViews, accessors, primitive.Indices);
+
+                    var attributes = new JObject { ["POSITION"] = positionAccessor };
+                    if (normalAccessor >= 0) attributes["NORMAL"] = normalAccessor;
+                    if (uvAccessor >= 0) attributes["TEXCOORD_0"] = uvAccessor;
+
+                    primitivesJson.Add(new JObject
+                    {
+                        ["attributes"] = attributes,
+                        ["indices"] = indexAccessor,
+                        ["material"] = materialIndex,
+                        ["mode"] = 4  // TRIANGLES
+                    });
+                }
 
                 // 顶点数据已落盘，立即释放；否则整个写出阶段都维持峰值内存
                 ReleasePrimitive(primitive);
@@ -324,7 +404,7 @@ namespace RevitTo3DTiles.Output
         }
 
         /// <summary>材质去重并生成glTF材质定义（含baseColorTexture引用；贴图可为外置URI或内嵌bufferView）</summary>
-        private static int GetMaterialIndex(RevitPrimitive primitive, JArray materials,
+        private static int GetMaterialIndex(RevitPrimitive primitive, GltfExportContext context, JArray materials,
             Dictionary<int, int> materialIndexMap, JArray textures, JArray images,
             Dictionary<string, int> textureIndexMap, Stream binary, JArray bufferViews)
         {
@@ -354,11 +434,12 @@ namespace RevitTo3DTiles.Output
             }
             else if (!string.IsNullOrEmpty(primitive.TextureSourcePath))
             {
-                // 内嵌模式：读字节写进 .bin 缓冲，image 用 bufferView + mimeType 引用（.glb/.gltf 通用）
+                // 内嵌模式：读字节写进 .bin 缓冲（开启归一化时先重采样到最近 2 的幂），
+                // image 用 bufferView + mimeType 引用（.glb/.gltf 通用）
                 int textureIndex;
                 if (!textureIndexMap.TryGetValue(primitive.TextureSourcePath, out textureIndex))
                 {
-                    byte[] bytes = File.ReadAllBytes(primitive.TextureSourcePath);
+                    byte[] bytes = TextureExtractor.GetTextureBytes(primitive.TextureSourcePath, context);
                     long byteOffset = AlignTo4(binary);
                     binary.Write(bytes, 0, bytes.Length);
                     bufferViews.Add(new JObject

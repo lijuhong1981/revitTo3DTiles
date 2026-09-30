@@ -71,5 +71,25 @@ namespace RevitTo3DTiles.Pipeline
                 "{0:0.######},{1:0.######},{2:0.##}",
                 Longitude, Latitude, Altitude);
         }
+
+        /// <summary>
+        /// 读取项目正北角（度）：项目北 → 正北的偏角，绕上轴右手方向为正。
+        /// 来自 ActiveProjectLocation 的 ProjectPosition.Angle（API 单位弧度）。
+        /// 读取失败返回 null；约等于 0 视为无偏转（调用方不必旋转）。
+        /// </summary>
+        public static double? ReadTrueNorthAngle(Document doc)
+        {
+            try
+            {
+                ProjectPosition position = doc.ActiveProjectLocation.GetProjectPosition(XYZ.Zero);
+                if (position == null)
+                    return null;
+                return position.Angle * 180.0 / Math.PI;
+            }
+            catch
+            {
+                return null;
+            }
+        }
     }
 }

@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Windows.Forms;
@@ -18,7 +19,7 @@ namespace RevitTo3DTiles.Commands
     /// 流程：设置弹窗（范围/精度/地理位置/转换选项）
     /// → 提取几何/材质/贴图/元数据（与导出 glTF 共用同一条提取管线，含实例化去重）
     /// → 写出临时 glb（内嵌贴图，单文件交接最稳）+ .metadata
-    /// → 调用 modelTo3DTiles 转换（--md 属性表 / --lla 地理位置 / --cc 锚点修正）
+    /// → 调用 modelTo3DTiles 转换（--md 属性表 / --lla 地理位置 / -r 正北旋转 / --ts 瓦片容量 / --cc 锚点修正）
     /// → 输出 tileset.json + b3dm。临时目录成功后删除，失败/取消时保留便于排查。
     /// 进度三段加权：提取 0~80% / 写出 80~90% / 转换 90~100%（跑马灯 + 转换器日志回显）。
     /// </summary>
@@ -76,8 +77,10 @@ namespace RevitTo3DTiles.Commands
                 {
                     var context = new GltfExportContext(tempDirectory, log)
                     {
-                        // 3D Tiles 管线走临时 glb：贴图内嵌，转换器自行外置去重
+                        // 3D Tiles 管线走临时 glb：贴图内嵌，转换器自行外置去重；
+                        // 2 的幂归一化恒开（Cesium 加载优化，2048 上限与转换器图集对齐）
                         SeparateTextures = false,
+                        NormalizeTextures = true,
                         OnProgress = (percent, text) =>
                         {
                             if (phase == 0) progress.Report(percent * 80 / 100, text);
@@ -96,8 +99,15 @@ namespace RevitTo3DTiles.Commands
                         context.Log(string.Format("地理位置: {0}", settings.GeoLocation.ToArgument()));
                     else
                         context.Log("地理位置: 未启用（转换器使用默认坐标定位）");
-                    context.Log(string.Format("贴地: {0} | 拆分: material（按材质装填）",
-                        settings.TilesClampToGround ? "是" : "否"));
+                    context.Log(string.Format("正北旋转: {0}", settings.TilesNorthRotation.HasValue
+                        ? string.Format(CultureInfo.InvariantCulture, "{0:0.##}°（项目北 → 正北）", settings.TilesNorthRotation.Value)
+                        : "否（项目无偏转或未勾选）"));
+                    context.Log(string.Format("单瓦片容量: {0:0.##}MB | 贴地: {1} | 拆分: material（按材质装填）",
+                        settings.TilesTileSizeMb, settings.TilesClampToGround ? "是" : "否"));
+                    context.Log(string.Format("Draco 压缩: {0} | 纹理图集: {1}",
+                        settings.TilesDracoCompression ? "开" : "关（排查瓦片异常）",
+                        settings.TilesTextureAtlas ? "开" : "关（排查贴图错位）"));
+                    context.Log("贴图: 内嵌 glb, 2的幂归一化: 开");
 
                     // 2. 提取（与 glTF 导出共用管线：实例化去重/真实世界缩放UV/外观贴图）
                     ExtractResult result = null;
@@ -173,7 +183,9 @@ namespace RevitTo3DTiles.Commands
                             progress.SetIndeterminate("正在转换 3D Tiles（Draco/纹理图集/属性表），可取消…");
                             ConverterLauncher.Result convert = ConverterLauncher.Run(
                                 glbPath, effectiveMetadataPath, outputDirectory,
-                                settings.GeoLocation, settings.TilesClampToGround, context);
+                                settings.GeoLocation, settings.TilesClampToGround,
+                                settings.TilesTileSizeMb, settings.TilesNorthRotation,
+                                settings.TilesDracoCompression, settings.TilesTextureAtlas, context);
 
                             if (convert.Cancelled)
                             {

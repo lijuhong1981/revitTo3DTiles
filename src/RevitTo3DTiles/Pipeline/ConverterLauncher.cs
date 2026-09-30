@@ -13,8 +13,10 @@ namespace RevitTo3DTiles.Pipeline
     /// 1. 插件程序集同目录（随安装包分发）
     /// 2. 环境变量 MODELTO3DTILES_PATH 指定
     /// 3. 系统PATH
-    /// 参数契约对齐 modelTo3DTiles v2.1.0：--md 为 BIM 语义 sidecar（.metadata，
-    /// Elements[].Key 与 glTF 节点 extras.uniqueId 对应），-lla 为度/米制经纬度。
+    /// 参数契约对齐 modelTo3DTiles v2.1.1（2.1.1 仅修复转换器内部贴图缓存坍缩，CLI 未变）：--md 为 BIM 语义 sidecar（.metadata，
+    /// Elements[].Key 与 glTF 节点 extras.uniqueId 对应），-lla 为度/米制经纬度；
+    /// --ts 为单瓦片容量 MB；-r 为绕上轴旋转（度，"x,y,z" 逗号分隔——glb 场景为 Y-up，绕上轴即第二分量 Y）；
+    /// -d/--no-d 为 Draco 几何压缩，--ta/--no-ta 为纹理图集合并（均默认开）。
     /// </summary>
     public static class ConverterLauncher
     {
@@ -50,18 +52,22 @@ namespace RevitTo3DTiles.Pipeline
 
         /// <summary>
         /// 执行转换。inputPath为glTF/glb；geoLocation非空且有效时传-lla定位；
-        /// metadataPath非空时传--md写入构件属性表；转换器输出的3DTiles落在outputDirectory。
+        /// metadataPath非空时传--md写入构件属性表；tileSizeMb非空时传--ts控制单瓦片容量；
+        /// northRotationDegrees非空时传-r绕上轴旋转到正北（度）；dracoCompression/textureAtlas
+        /// 控制 Draco 压缩与纹理图集（均默认开，显式传正反两种状态便于日志溯源）。
+        /// 转换器输出的3DTiles落在outputDirectory。
         /// 瓦片拆分固定为 material（按材质装填，体积最小加载最快）。
         /// 等待期间轮询取消（取消时杀掉转换进程并返回Cancelled），并泵消息保持进度窗响应。
         /// </summary>
         public static Result Run(string inputPath, string metadataPath, string outputDirectory,
-            GeoLocation geoLocation, bool clampToGround, GltfExportContext context)
+            GeoLocation geoLocation, bool clampToGround, double? tileSizeMb, double? northRotationDegrees,
+            bool dracoCompression, bool textureAtlas, GltfExportContext context)
         {
             string converterPath = ResolveConverterPath();
             var result = new Result { ConverterPath = converterPath };
 
             var arguments = new StringBuilder();
-            // 注意：yargs 只对单字符别名接受单横线（-i/-o/-s），多字符别名必须双横线
+            // 注意：yargs 只对单字符别名接受单横线（-i/-o/-s/-r），多字符别名必须双横线
             //（单横线 -lla/-md 会被当作短旗标簇解析而静默落回默认值，已在转换器侧实测）
             arguments.AppendFormat(CultureInfo.InvariantCulture, "-i \"{0}\"", inputPath);
             arguments.AppendFormat(CultureInfo.InvariantCulture, " -o \"{0}\"", outputDirectory);
@@ -72,6 +78,12 @@ namespace RevitTo3DTiles.Pipeline
             arguments.Append(" --cc");
             arguments.Append(clampToGround ? " --ctg" : " --no-ctg");
             arguments.Append(" -s material");
+            if (tileSizeMb.HasValue)
+                arguments.AppendFormat(CultureInfo.InvariantCulture, " --ts {0:0.##}", tileSizeMb.Value);
+            if (northRotationDegrees.HasValue)
+                arguments.AppendFormat(CultureInfo.InvariantCulture, " -r \"0,{0:0.######},0\"", northRotationDegrees.Value);
+            arguments.Append(dracoCompression ? " -d" : " --no-d");
+            arguments.Append(textureAtlas ? " --ta" : " --no-ta");
 
             context.Log("调用转换器: " + converterPath);
             context.Log("参数: " + arguments);

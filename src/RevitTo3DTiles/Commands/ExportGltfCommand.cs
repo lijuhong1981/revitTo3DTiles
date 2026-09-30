@@ -9,16 +9,17 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using RevitTo3DTiles.Extraction;
 using RevitTo3DTiles.Models;
+using RevitTo3DTiles.Native;
 using RevitTo3DTiles.Output;
 using RevitTo3DTiles.Pipeline;
 
 namespace RevitTo3DTiles.Commands
 {
     /// <summary>
-    /// 导出 glTF 命令：设置弹窗（范围/文件名/目录/DetailLevel/Triangulate/格式/元数据/贴图分离）
+    /// 导出 glTF 命令：设置弹窗（范围/文件名/目录/DetailLevel/Triangulate/格式/元数据/贴图分离/贴图标准化）
     /// → 按所选精度提取几何/材质/贴图 → 写出单个 glTF（.gltf + .bin + textures/ 或 .glb）。
     /// 可选勾选「导出元数据」生成同名 .metadata（项目信息 + 构件 BIM 信息）。
-    /// 行为自 revitToGltf v0.4.1 等价迁移（设置弹窗抽出为共享的 ExportSettingsForm）。
+    /// 行为自 revitToGltf v0.5.0 等价迁移（设置弹窗抽出为共享的 ExportSettingsForm）。
     /// 不调用 3D Tiles 转换器——那是「导出 3D Tiles」按钮的职责。
     /// 输出为 <根目录>\<项目名>_<detail>_<tri>.gltf（如 ljdd_fine_1.00.gltf），统计追加写入 gltf-export.log。
     /// </summary>
@@ -74,13 +75,18 @@ namespace RevitTo3DTiles.Commands
                         OnProgress = (percent, text) => progress.Report(
                             writing ? 85 + percent * 15 / 100 : percent * 85 / 100, text),
                         ShouldCancel = () => progress.Cancelled,
-                        SeparateTextures = settings.SeparateTextures
+                        SeparateTextures = settings.SeparateTextures,
+                        NormalizeTextures = settings.NormalizeTextures,
+                        DracoEnabled = settings.DracoCompression && DracoEncoder.Available
                     };
                     context.Log(string.Empty);
                     context.Log(string.Format("===== 导出 glTF: {0} ({1}) =====", doc.Title, doc.PathName));
                     context.Log(string.Format("范围: {0}", settings.ScopeName));
                     context.Log(string.Format("精度: Detail={0}, Tri={1}", settings.DetailLevel, ExportSettingsForm.TriText(settings.TriangulateLod)));
-                    context.Log(string.Format("贴图: {0}", settings.SeparateTextures ? "分离到 textures/" : "内嵌进 bin/glb"));
+                    context.Log(string.Format("贴图: {0}, 2的幂归一化: {1}, Draco压缩: {2}",
+                        settings.SeparateTextures ? "分离到 textures/" : "内嵌进 bin/glb",
+                        settings.NormalizeTextures ? "开" : "关",
+                        context.DracoEnabled ? "开" : (settings.DracoCompression ? "开(原生dll缺失,已回退关闭)" : "关")));
                     context.Log(string.Format("输出文件: {0}", gltfPath));
                     if (settings.ExportMetadata)
                         context.Log(string.Format("输出元数据: {0}", metadataPath));
@@ -151,6 +157,17 @@ namespace RevitTo3DTiles.Commands
                                     context.SharedMeshCount, context.InstanceCount,
                                     context.ExpandedTriangleCount, context.TriangleCount,
                                     (1 - (double)context.TriangleCount / Math.Max(1, context.ExpandedTriangleCount)) * 100);
+
+                            if (context.DracoPrimitiveCount > 0)
+                                summaryLine += string.Format("\nDraco: {0} 图元 {1:0.0}MB → {2:0.0}MB (省 {3:0.0}%)",
+                                    context.DracoPrimitiveCount,
+                                    context.DracoRawBytes / 1048576.0,
+                                    context.DracoCompressedBytes / 1048576.0,
+                                    (1 - (double)context.DracoCompressedBytes / Math.Max(1, context.DracoRawBytes)) * 100);
+                            if (context.DracoSkippedCount > 0)
+                                summaryLine += string.Format("\nDraco: {0} 图元超限未压缩", context.DracoSkippedCount);
+                            if (context.DracoFailedCount > 0)
+                                summaryLine += string.Format("\nDraco: {0} 图元编码失败已回退未压缩", context.DracoFailedCount);
 
                             if (settings.ExportMetadata)
                             {

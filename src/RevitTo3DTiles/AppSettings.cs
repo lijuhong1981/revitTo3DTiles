@@ -25,14 +25,21 @@ namespace RevitTo3DTiles
             public bool Binary { get; set; }                    // true = .glb
             public bool ExportMetadata { get; set; }
             public bool SeparateTextures { get; set; } = true;
+            public bool NormalizeTextures { get; set; } = true;  // 非 2 的幂 PNG/JPEG 重采样到最近 2 的幂
+            public bool DracoEnabled { get; set; }                // glTF 输出 Draco 几何压缩（需查看器支持解码）
 
             // —— 3D Tiles 导出专属（与 glTF 弹窗互不干扰）——
+            public string TilesLastOutputDirectory { get; set; }   // 输出路径（基础目录，最终目录 = 路径\目录名）
             public bool TilesExportMetadata { get; set; } = true;   // BIM 属性写入瓦片属性表（--md）
             public bool TilesUseGeolocation { get; set; } = true;   // 使用项目地理位置（-lla）
             public double TilesLongitude { get; set; }              // 手改后持久化的覆盖值（度）
             public double TilesLatitude { get; set; }
             public double TilesAltitude { get; set; }               // 米
             public bool TilesClampToGround { get; set; } = false;   // 自动贴地（--ctg）
+            public bool TilesRotateToNorth { get; set; } = true;    // 旋转到正北（-r，项目正北角自动读取）
+            public double TilesTileSizeMb { get; set; } = 10;       // 单瓦片容量 MB（--ts）
+            public bool TilesDracoCompression { get; set; } = true; // Draco 几何压缩（-d）
+            public bool TilesTextureAtlas { get; set; } = true;     // 纹理图集合并（--ta）
         }
 
         private static Settings _cached;

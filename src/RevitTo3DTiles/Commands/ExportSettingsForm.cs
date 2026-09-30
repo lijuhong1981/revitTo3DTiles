@@ -38,11 +38,25 @@ namespace RevitTo3DTiles.Commands
         public bool Binary;
         public bool ExportMetadata;
         public bool SeparateTextures = true;
+        public bool NormalizeTextures = true;
+        public bool DracoCompression;
 
         // —— 3D Tiles 模式专属 ——
         public bool TilesExportMetadata = true;
         public GeoLocation GeoLocation;
         public bool TilesClampToGround;
+
+        /// <summary>单瓦片容量 MB（--ts），弹窗默认 10</summary>
+        public double TilesTileSizeMb = 10;
+
+        /// <summary>正北旋转角（度，绕上轴右手为正）；null = 不旋转（不传 -r）</summary>
+        public double? TilesNorthRotation;
+
+        /// <summary>Draco 几何压缩（-d），默认开；排查瓦片异常时可关</summary>
+        public bool TilesDracoCompression = true;
+
+        /// <summary>纹理图集合并（--ta），默认开；排查贴图错位时可关</summary>
+        public bool TilesTextureAtlas = true;
     }
 
     /// <summary>
@@ -63,7 +77,7 @@ namespace RevitTo3DTiles.Commands
         }
 
         // ==========================================================================================
-        // glTF 模式：布局与行为自 revitToGltf v0.4.1 等价迁移
+        // glTF 模式：布局与行为自 revitToGltf v0.5.0 等价迁移
         // ==========================================================================================
 
         private static ExportSettings ShowGltf(UIDocument uiDocument, Document doc)
@@ -85,13 +99,15 @@ namespace RevitTo3DTiles.Commands
             bool chosenBinary = saved.Binary;    // false=.gltf true=.glb
             bool chosenMeta = saved.ExportMetadata;       // 是否导出元数据 .metadata
             bool chosenSeparateTex = saved.SeparateTextures; // 贴图是否分离到 textures/（默认勾选）
+            bool chosenNormalizeTex = saved.NormalizeTextures; // 贴图重采样到最近 2 的幂（默认勾选）
+            bool chosenDraco = saved.DracoEnabled;   // Draco 几何压缩（默认不勾：输出需查看器支持解码）
             bool nameEdited = false;      // 用户手工改过文件名后，滑动条不再自动改写
             bool suppressNameSync = false; // 程序化赋值时抑制 TextChanged 的"已编辑"标记
 
             using (var form = new System.Windows.Forms.Form())
             {
                 form.Text = "导出 glTF 设置";
-                form.ClientSize = new System.Drawing.Size(1100, 672);
+                form.ClientSize = new System.Drawing.Size(1100, 744);
                 form.FormBorderStyle = FormBorderStyle.FixedDialog;
                 form.MaximizeBox = false;
                 form.MinimizeBox = false;
@@ -127,11 +143,11 @@ namespace RevitTo3DTiles.Commands
                 Func<string> triSlug = () => chosenTri.HasValue
                     ? chosenTri.Value.ToString("0.00", CultureInfo.InvariantCulture) : "default";
                 Func<string> defaultName = () => projectName + "_" + DetailSlug(chosenDetail) + "_" + triSlug();
-                var nameLabel = new Label { Text = "文件名:", Left = 12, Top = 532, Width = 160 };
+                var nameLabel = new Label { Text = "文件名:", Left = 12, Top = 604, Width = 160 };
                 var nameBox = new System.Windows.Forms.TextBox
                 {
                     Left = 12,
-                    Top = 560,
+                    Top = 632,
                     Width = 920,
                     Height = 32,
                     Text = defaultName()
@@ -220,17 +236,17 @@ namespace RevitTo3DTiles.Commands
                 };
 
                 // ---- 输出目录 ----
-                var dirLabel = new Label { Text = "输出目录:", Left = 12, Top = 458, Width = 160 };
+                var dirLabel = new Label { Text = "输出目录:", Left = 12, Top = 530, Width = 160 };
                 var dirBox = new System.Windows.Forms.TextBox
                 {
                     Left = 12,
-                    Top = 486,
+                    Top = 558,
                     Width = 920,
                     Height = 32,
                     Text = chosenDir,
                     ReadOnly = true
                 };
-                var browseButton = new Button { Text = "浏览...", Left = 948, Top = 484, Width = 140, Height = 38 };
+                var browseButton = new Button { Text = "浏览...", Left = 948, Top = 556, Width = 140, Height = 38 };
                 browseButton.Click += (s, e) =>
                 {
                     using (var dlg = new System.Windows.Forms.FolderBrowserDialog())
@@ -285,24 +301,48 @@ namespace RevitTo3DTiles.Commands
                 };
                 separateTexCheck.CheckedChanged += (s, e) => { chosenSeparateTex = separateTexCheck.Checked; };
 
+                // 贴图 2 的幂归一化：独立一行（贴图分离下方），非 2 的幂 PNG/JPEG 重采样到最近 2 的幂
+                var normalizeTexCheck = new CheckBox
+                {
+                    Text = "贴图标准化(尺寸2的幂归一化)",
+                    Left = 12,
+                    Top = 424,
+                    AutoSize = true,
+                    Checked = chosenNormalizeTex,
+                    BackColor = System.Drawing.Color.Transparent
+                };
+                normalizeTexCheck.CheckedChanged += (s, e) => { chosenNormalizeTex = normalizeTexCheck.Checked; };
+
+                // Draco 几何压缩：独立一行，输出标记 extensionsRequired，需查看器支持解码（Cesium 内置）
+                var dracoCheck = new CheckBox
+                {
+                    Text = "Draco 几何压缩（体积 -80% 左右，需查看器支持解码）",
+                    Left = 12,
+                    Top = 460,
+                    AutoSize = true,
+                    Checked = chosenDraco,
+                    BackColor = System.Drawing.Color.Transparent
+                };
+                dracoCheck.CheckedChanged += (s, e) => { chosenDraco = dracoCheck.Checked; };
+
                 // 导出元数据：独立一行（不放同一 FlowLayoutPanel，避免与格式单选同行）
                 var exportMetaCheck = new CheckBox
                 {
                     Text = "导出元数据（同名 .metadata）",
                     Left = 12,
-                    Top = 424,
+                    Top = 496,
                     AutoSize = true,
                     Checked = chosenMeta,
                     BackColor = System.Drawing.Color.Transparent
                 };
                 exportMetaCheck.CheckedChanged += (s, e) => { chosenMeta = exportMetaCheck.Checked; };
 
-                var okButton = new Button { Text = "导出", Left = 828, Top = 604, Width = 120, Height = 42 };
+                var okButton = new Button { Text = "导出", Left = 828, Top = 676, Width = 120, Height = 42 };
                 var cancelButton = new Button
                 {
                     Text = "取消",
                     Left = 960,
-                    Top = 604,
+                    Top = 676,
                     Width = 120,
                     Height = 42,
                     DialogResult = DialogResult.Cancel
@@ -354,6 +394,8 @@ namespace RevitTo3DTiles.Commands
                     toSave.Binary = chosenBinary;
                     toSave.ExportMetadata = chosenMeta;
                     toSave.SeparateTextures = chosenSeparateTex;
+                    toSave.NormalizeTextures = chosenNormalizeTex;
+                    toSave.DracoEnabled = chosenDraco;
                     AppSettings.Save(toSave);
                     form.DialogResult = DialogResult.OK;
                     form.Close();
@@ -369,6 +411,8 @@ namespace RevitTo3DTiles.Commands
                 form.Controls.Add(fmtPanel);
                 form.Controls.Add(exportMetaCheck);
                 form.Controls.Add(separateTexCheck);
+                form.Controls.Add(normalizeTexCheck);
+                form.Controls.Add(dracoCheck);
                 form.Controls.Add(detailLabel);
                 form.Controls.Add(radioCoarse);
                 form.Controls.Add(radioMedium);
@@ -394,7 +438,9 @@ namespace RevitTo3DTiles.Commands
                 TriangulateLod = chosenTri,
                 Binary = chosenBinary,
                 ExportMetadata = chosenMeta,
-                SeparateTextures = chosenSeparateTex
+                SeparateTextures = chosenSeparateTex,
+                NormalizeTextures = chosenNormalizeTex,
+                DracoCompression = chosenDraco
             };
             if (!ResolveScope(uiDocument, doc, scopeChoice, result))
                 return null;
@@ -403,7 +449,7 @@ namespace RevitTo3DTiles.Commands
 
         // ==========================================================================================
         // 3D Tiles 模式：公共区（范围/精度）与 glTF 相同，专属区为地理定位与转换选项；
-        // 输出为目录（tileset.json 所在目录），无文件名一行。
+        // 输出 = 输出路径\输出目录名（目录名默认沿用 glTF 文件名 + "_3dtiles"，随精度联动）。
         // ==========================================================================================
 
         private static ExportSettings ShowTiles3D(UIDocument uiDocument, Document doc)
@@ -411,9 +457,12 @@ namespace RevitTo3DTiles.Commands
             string projectName = ProjectNameOf(doc);
 
             AppSettings.Settings saved = AppSettings.Load();
-            string chosenDir = (!string.IsNullOrWhiteSpace(saved.LastOutputDirectory) && Directory.Exists(saved.LastOutputDirectory))
-                ? saved.LastOutputDirectory
-                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), projectName + "_3dtiles");
+            string chosenBaseDir = (!string.IsNullOrWhiteSpace(saved.TilesLastOutputDirectory) && Directory.Exists(saved.TilesLastOutputDirectory))
+                ? saved.TilesLastOutputDirectory
+                : Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            string chosenFolderName = null;
+            bool nameEdited = false;      // 用户手工改过目录名后，滑动条不再自动改写
+            bool suppressNameSync = false; // 程序化赋值时抑制 TextChanged 的"已编辑"标记
 
             int scopeChoice = saved.Scope;
             if (scopeChoice < 0 || scopeChoice > 2) scopeChoice = 1;
@@ -437,11 +486,19 @@ namespace RevitTo3DTiles.Commands
             }
             bool chosenMeta = saved.TilesExportMetadata;
             bool chosenClamp = saved.TilesClampToGround;
+            bool chosenDraco = saved.TilesDracoCompression;       // Draco 压缩（默认开，排查异常可关）
+            bool chosenAtlas = saved.TilesTextureAtlas;           // 纹理图集（默认开，排查贴图可关）
+
+            // 正北角：项目北 → 正北偏角自动读取；无偏转或读取失败时勾选框禁用（勾了也不会旋转）
+            double? projectNorth = GeoLocation.ReadTrueNorthAngle(doc);
+            bool northAvailable = projectNorth.HasValue && Math.Abs(projectNorth.Value) > 0.01;
+            bool chosenNorth = saved.TilesRotateToNorth && northAvailable;
+            double chosenTileSizeMb = saved.TilesTileSizeMb > 0 ? saved.TilesTileSizeMb : 10;
 
             using (var form = new System.Windows.Forms.Form())
             {
                 form.Text = "导出 3D Tiles 设置";
-                form.ClientSize = new System.Drawing.Size(1100, 694);
+                form.ClientSize = new System.Drawing.Size(1100, 906);
                 form.FormBorderStyle = FormBorderStyle.FixedDialog;
                 form.MaximizeBox = false;
                 form.MinimizeBox = false;
@@ -471,6 +528,32 @@ namespace RevitTo3DTiles.Commands
                 scopeGroup.Controls.Add(radioView);
                 scopeGroup.Controls.Add(radioSel);
 
+                // ---- 输出目录名（最终目录 = 输出路径\目录名，视觉排在下方）。默认沿用 glTF
+                //      输出文件名 + "_3dtiles"，随精度联动；一旦用户手工改动过，就不再自动改写。 ----
+                Func<string> triSlug = () => chosenTri.HasValue
+                    ? chosenTri.Value.ToString("0.00", CultureInfo.InvariantCulture) : "default";
+                Func<string> defaultFolderName = () => projectName + "_" + DetailSlug(chosenDetail) + "_" + triSlug() + "_3dtiles";
+                var folderNameLabel = new Label { Text = "输出目录名:", Left = 12, Top = 772, Width = 160, Height = 30 };
+                var folderNameBox = new System.Windows.Forms.TextBox
+                {
+                    Left = 12,
+                    Top = 800,
+                    Width = 920,
+                    Height = 32,
+                    Text = defaultFolderName()
+                };
+                folderNameBox.TextChanged += (s, e) =>
+                {
+                    if (!suppressNameSync) nameEdited = true;
+                };
+                Action syncName = () =>
+                {
+                    if (nameEdited) return;
+                    suppressNameSync = true;
+                    folderNameBox.Text = defaultFolderName();
+                    suppressNameSync = false;
+                };
+
                 // ---- DetailLevel（与 glTF 弹窗一致） ----
                 var detailLabel = new Label { Text = "DetailLevel（视图详细程度）:", Left = 12, Top = 142, Width = 600 };
                 var radioCoarse = new RadioButton
@@ -490,9 +573,9 @@ namespace RevitTo3DTiles.Commands
                     Text = "Fine（最细）", Left = 512, Top = 180, Width = 230, Height = RadioHeight, AutoSize = false, Checked = (chosenDetail == ViewDetailLevel.Fine),
                     BackColor = System.Drawing.Color.Transparent
                 };
-                radioCoarse.CheckedChanged += (s, e) => { if (radioCoarse.Checked) chosenDetail = ViewDetailLevel.Coarse; };
-                radioMedium.CheckedChanged += (s, e) => { if (radioMedium.Checked) chosenDetail = ViewDetailLevel.Medium; };
-                radioFine.CheckedChanged += (s, e) => { if (radioFine.Checked) chosenDetail = ViewDetailLevel.Fine; };
+                radioCoarse.CheckedChanged += (s, e) => { if (radioCoarse.Checked) { chosenDetail = ViewDetailLevel.Coarse; syncName(); } };
+                radioMedium.CheckedChanged += (s, e) => { if (radioMedium.Checked) { chosenDetail = ViewDetailLevel.Medium; syncName(); } };
+                radioFine.CheckedChanged += (s, e) => { if (radioFine.Checked) { chosenDetail = ViewDetailLevel.Fine; syncName(); } };
 
                 // ---- 三角化精度（与 glTF 弹窗一致） ----
                 var useTriCheck = new CheckBox
@@ -521,11 +604,13 @@ namespace RevitTo3DTiles.Commands
                         chosenTri = null;
                         triValue.Text = "default";
                     }
+                    syncName();
                 };
                 triTrack.ValueChanged += (s, e) =>
                 {
                     chosenTri = triTrack.Value / 100.0;
                     triValue.Text = chosenTri.Value.ToString("0.00", CultureInfo.InvariantCulture);
+                    syncName();
                 };
 
                 // ---- 3D Tiles 专属：BIM 属性（高DPI下TrackBar实际高约80px，需留足间距） ----
@@ -575,40 +660,108 @@ namespace RevitTo3DTiles.Commands
                 geoGroup.Controls.Add(altLabel);
                 geoGroup.Controls.Add(altBox);
 
+                // ---- 3D Tiles 专属：旋转到正北（项目正北角自动读取，文字反映读取状态） ----
+                string northText;
+                if (!projectNorth.HasValue)
+                    northText = "旋转到正北（未读到项目正北角）";
+                else if (!northAvailable)
+                    northText = "旋转到正北（项目无偏转）";
+                else
+                    northText = string.Format(CultureInfo.InvariantCulture,
+                        "旋转到正北（项目正北角 {0:0.##}°，自动读取）", projectNorth.Value);
+                var northCheck = new CheckBox
+                {
+                    Text = northText,
+                    Left = 12, Top = 502, AutoSize = true,
+                    Checked = chosenNorth,
+                    Enabled = northAvailable,
+                    BackColor = System.Drawing.Color.Transparent
+                };
+                northCheck.CheckedChanged += (s, e) => { chosenNorth = northCheck.Checked; };
+
+                // ---- 3D Tiles 专属：单瓦片容量（--ts），留空 = 默认 10。
+                //      Box/Label 显式高，行高不随 DPI 漂移（AutoSize 控件在高 DPI 下会超出固定行距） ----
+                var tileSizeLabel = new Label { Text = "单瓦片容量(MB):", Left = 12, Top = 552, Width = 132, Height = 30 };
+                var tileSizeBox = new System.Windows.Forms.TextBox
+                {
+                    Left = 152, Top = 546, Width = 80, Height = 32,
+                    Text = chosenTileSizeMb.ToString("0.##", CultureInfo.InvariantCulture)
+                };
+                var tileSizeHint = new Label
+                {
+                    Text = "默认 10；调大 = 瓦片更少更整，调小 = 加载粒度更细",
+                    Left = 250, Top = 552, Width = 760, Height = 30
+                };
+
+                // ---- 3D Tiles 专属：转换优化（Draco 压缩 / 纹理图集并排一行，均为诊断用开关）。
+                //      勾选框 AutoSize=false + 显式宽高（同弹窗单选按钮的做法）：
+                //      高 DPI 下 AutoSize 行高会超出固定行距把文字顶进上一行，锁定高度后不再漂移 ----
+                var convertLabel = new Label { Text = "转换优化:", Left = 12, Top = 612, Width = 120, Height = 30 };
+                var dracoCheck = new CheckBox
+                {
+                    Text = "Draco 几何压缩（体积更小）",
+                    AutoSize = false, Width = 360, Height = 32,
+                    BackColor = System.Drawing.Color.Transparent,
+                    Checked = chosenDraco
+                };
+                dracoCheck.CheckedChanged += (s, e) => { chosenDraco = dracoCheck.Checked; };
+                var atlasCheck = new CheckBox
+                {
+                    Text = "纹理图集（合并贴图，减少 draw call）",
+                    AutoSize = false, Width = 520, Height = 32,
+                    BackColor = System.Drawing.Color.Transparent,
+                    Checked = chosenAtlas
+                };
+                atlasCheck.CheckedChanged += (s, e) => { chosenAtlas = atlasCheck.Checked; };
+                // FlowLayoutPanel 按文字实际宽度排布，避免高 DPI 下固定宽度截断（同 glTF 格式行）
+                var convertPanel = new System.Windows.Forms.FlowLayoutPanel
+                {
+                    Left = 140,
+                    Top = 606,
+                    Width = 940,
+                    Height = 40,
+                    FlowDirection = System.Windows.Forms.FlowDirection.LeftToRight,
+                    WrapContents = false
+                };
+                convertPanel.Controls.Add(dracoCheck);
+                convertPanel.Controls.Add(atlasCheck);
+
                 // ---- 3D Tiles 专属：贴地 ----
                 var clampCheck = new CheckBox
                 {
                     Text = "自动贴地（忽略海拔，模型底面落在地表）",
-                    Left = 12, Top = 510, Width = 880, AutoSize = true,
+                    Left = 12, Top = 656, Width = 880, AutoSize = true,
                     Checked = chosenClamp,
                     BackColor = System.Drawing.Color.Transparent
                 };
 
-                // ---- 输出目录（tileset.json 所在目录） ----
-                var dirLabel = new Label { Text = "输出目录:", Left = 12, Top = 554, Width = 160 };
+                // ---- 输出路径（基础目录，最终输出目录 = 路径\目录名） ----
+                var dirLabel = new Label { Text = "输出路径:", Left = 12, Top = 700, Width = 160, Height = 30 };
                 var dirBox = new System.Windows.Forms.TextBox
                 {
-                    Left = 12, Top = 582, Width = 920, Height = 32, Text = chosenDir, ReadOnly = true
+                    Left = 12, Top = 728, Width = 920, Height = 32, Text = chosenBaseDir, ReadOnly = true
                 };
-                var browseButton = new Button { Text = "浏览...", Left = 948, Top = 580, Width = 140, Height = 38 };
+                var browseButton = new Button { Text = "浏览...", Left = 948, Top = 726, Width = 140, Height = 38 };
                 browseButton.Click += (s, e) =>
                 {
                     using (var dlg = new System.Windows.Forms.FolderBrowserDialog())
                     {
-                        dlg.Description = "选择 3D Tiles 输出目录";
-                        dlg.SelectedPath = string.IsNullOrEmpty(dirBox.Text) ? chosenDir : dirBox.Text;
+                        dlg.Description = "选择 3D Tiles 输出路径";
+                        dlg.SelectedPath = string.IsNullOrEmpty(dirBox.Text) ? chosenBaseDir : dirBox.Text;
                         if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
                             dirBox.Text = dlg.SelectedPath;
                     }
                 };
 
-                var okButton = new Button { Text = "导出", Left = 828, Top = 640, Width = 120, Height = 42 };
+                var okButton = new Button { Text = "导出", Left = 828, Top = 852, Width = 120, Height = 42 };
                 var cancelButton = new Button
                 {
-                    Text = "取消", Left = 960, Top = 640, Width = 120, Height = 42,
+                    Text = "取消", Left = 960, Top = 852, Width = 120, Height = 42,
                     DialogResult = DialogResult.Cancel
                 };
                 GeoLocation chosenGeo = null;
+                double parsedTileSizeMb = chosenTileSizeMb;
+                double? chosenNorthRotation = null;
                 okButton.Click += (s, e) =>
                 {
                     scopeChoice = radioSel.Checked ? 2 : (radioFull.Checked ? 0 : 1);
@@ -625,7 +778,20 @@ namespace RevitTo3DTiles.Commands
                     }
                     if (string.IsNullOrWhiteSpace(dirBox.Text))
                     {
-                        MessageBox.Show(form, "请选择输出目录。", "目录为空",
+                        MessageBox.Show(form, "请选择输出路径。", "路径为空",
+                            MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                    string folderCandidate = folderNameBox.Text.Trim();
+                    if (string.IsNullOrEmpty(folderCandidate))
+                    {
+                        MessageBox.Show(form, "请输入输出目录名。", "目录名为空",
+                            MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+                    if (folderCandidate.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                    {
+                        MessageBox.Show(form, "输出目录名含有非法字符（不能包含 \\ / : * ? \" < > |）。", "目录名非法",
                             MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         return;
                     }
@@ -648,10 +814,28 @@ namespace RevitTo3DTiles.Commands
                         chosenGeo = null;
                     }
 
-                    chosenDir = dirBox.Text;
+                    // 单瓦片容量：留空 = 默认 10；数字需在 1~2048 之间
+                    string tsText = tileSizeBox.Text.Trim();
+                    if (string.IsNullOrEmpty(tsText))
+                        parsedTileSizeMb = 10;
+                    else if (!double.TryParse(tsText, NumberStyles.Float, CultureInfo.InvariantCulture, out parsedTileSizeMb)
+                        || parsedTileSizeMb < 1 || parsedTileSizeMb > 2048)
+                    {
+                        MessageBox.Show(form, "单瓦片容量需为 1~2048 之间的数字（MB，小数点用 . ），留空使用默认 10。",
+                            "瓦片容量非法", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        return;
+                    }
+
+                    // 正北旋转：仅当勾选框可用且勾选、且角度确实读到时传 -r
+                    if (northCheck.Enabled && northCheck.Checked && projectNorth.HasValue)
+                        chosenNorthRotation = projectNorth.Value;
+
+                    chosenFolderName = folderCandidate;
+                    chosenBaseDir = dirBox.Text.Trim();
                     // 按域保存：公共项 + 3D Tiles 专属项；glTF 域字段原样保留
+                    //（输出路径只持久化基础目录，目录名每次按默认名重新生成，与 glTF 文件名一致不落盘）
                     AppSettings.Settings toSave = AppSettings.Load();
-                    toSave.LastOutputDirectory = chosenDir;
+                    toSave.TilesLastOutputDirectory = chosenBaseDir;
                     toSave.Scope = scopeChoice;
                     toSave.DetailLevel = DetailSlug(chosenDetail);
                     toSave.UseCustomTriangulate = chosenTri.HasValue;
@@ -659,6 +843,12 @@ namespace RevitTo3DTiles.Commands
                     toSave.TilesExportMetadata = metaCheck.Checked;
                     toSave.TilesUseGeolocation = useGeoCheck.Checked;
                     toSave.TilesClampToGround = clampCheck.Checked;
+                    toSave.TilesTileSizeMb = parsedTileSizeMb;
+                    toSave.TilesDracoCompression = dracoCheck.Checked;
+                    toSave.TilesTextureAtlas = atlasCheck.Checked;
+                    // 正北勾选框不可用（无偏转/读取失败）时保留原偏好，不把 false 写死
+                    if (northCheck.Enabled)
+                        toSave.TilesRotateToNorth = northCheck.Checked;
                     if (chosenGeo != null)
                     {
                         toSave.TilesLongitude = chosenGeo.Longitude;
@@ -681,10 +871,18 @@ namespace RevitTo3DTiles.Commands
                 form.Controls.Add(metaCheck);
                 form.Controls.Add(useGeoCheck);   // 标题勾选框（表单子控件，压在分组框边框线上）
                 form.Controls.Add(geoGroup);
+                form.Controls.Add(northCheck);
+                form.Controls.Add(tileSizeLabel);
+                form.Controls.Add(tileSizeBox);
+                form.Controls.Add(tileSizeHint);
+                form.Controls.Add(convertLabel);
+                form.Controls.Add(convertPanel);
                 form.Controls.Add(clampCheck);
                 form.Controls.Add(dirLabel);
                 form.Controls.Add(dirBox);
                 form.Controls.Add(browseButton);
+                form.Controls.Add(folderNameLabel);
+                form.Controls.Add(folderNameBox);
                 form.Controls.Add(okButton);
                 form.Controls.Add(cancelButton);
                 form.AcceptButton = okButton;
@@ -696,12 +894,16 @@ namespace RevitTo3DTiles.Commands
 
                 var result = new ExportSettings
                 {
-                    OutputDirectory = chosenDir,
+                    OutputDirectory = System.IO.Path.Combine(chosenBaseDir, chosenFolderName),
                     DetailLevel = chosenDetail,
                     TriangulateLod = chosenTri,
                     TilesExportMetadata = metaCheck.Checked,
                     GeoLocation = chosenGeo,
-                    TilesClampToGround = clampCheck.Checked
+                    TilesClampToGround = clampCheck.Checked,
+                    TilesTileSizeMb = parsedTileSizeMb,
+                    TilesNorthRotation = chosenNorthRotation,
+                    TilesDracoCompression = dracoCheck.Checked,
+                    TilesTextureAtlas = atlasCheck.Checked
                 };
                 if (!ResolveScope(uiDocument, doc, scopeChoice, result))
                     return null;
