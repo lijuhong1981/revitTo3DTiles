@@ -2,7 +2,7 @@
 
 Revit 模型一键导出 **glTF 与 3D Tiles** 的 Revit 插件。两个按钮共用同一条提取管线（贴图、实例化去重、真实世界缩放 UV），glTF 直接落盘，3D Tiles 经 [modelTo3DTiles](https://github.com/lijuhong1981/modelTo3DTiles) 转换后输出，保留**贴图、BIM 属性集与楼层层级**，可在 Cesium / three.js 中加载并支持构件级拾取与按楼层过滤。
 
-> 本工程由 [revitToGltf](https://github.com/lijuhong1981/revitToGltf)（v0.6.0 提取管线）与 [modelTo3DTiles](https://github.com/lijuhong1981/modelTo3DTiles)（v2.1.1 转换器）整合而来：**导出 glTF** 保留原 revitToGltf 全部功能，**导出 3D Tiles** 在其下游接一键转换。
+> 本工程由 [revitToGltf](https://github.com/lijuhong1981/revitToGltf)（v0.6.0 提取管线）与 [modelTo3DTiles](https://github.com/lijuhong1981/modelTo3DTiles)（v2.2.0 转换器）整合而来：**导出 glTF** 保留原 revitToGltf 全部功能，**导出 3D Tiles** 在其下游接一键转换。
 
 ## 架构
 
@@ -54,7 +54,7 @@ msbuild revitTo3DTiles.sln -p:Configuration=Release
 - `RevitTo3DTiles.dll`
 - `RevitTo3DTiles.addin`
 - `DracoWrapper.dll`（glTF 的 Draco 几何压缩所需）
-- `modelTo3DTiles.exe`（3D Tiles 导出所需，已含 v2.1.1 版）
+- `modelTo3DTiles.exe`（3D Tiles 导出所需，已含 v2.2.0 版）
 
 将四个文件一起复制到：
 
@@ -119,7 +119,7 @@ C:\ProgramData\Autodesk\Revit\Addins\2020\
 
 中间产物（临时 glb + .metadata）写在系统临时目录，**导出成功后自动清理；失败/取消时保留**并在弹窗中给出路径，便于排查。
 
-## 转换器对接契约（modelTo3DTiles v2.1.1）
+## 转换器对接契约（modelTo3DTiles v2.2.0）
 
 - `--md <path>`：BIM 语义 sidecar（`.metadata`，Elements 数组，Key 与 glTF 节点 `extras.uniqueId` 对应）→ 瓦片内 `EXT_structural_metadata` 七列属性表（name/elementId/category/family/type/storey/parameters）
 - `--lla "lng,lat,alt"`：度/米制地理定位 → 根节点 ENU→ECEF 变换；**必须双横线**（单横线 `-lla` 会被 yargs 当短旗标簇静默忽略）

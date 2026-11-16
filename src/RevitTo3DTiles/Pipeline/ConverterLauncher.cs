@@ -13,7 +13,7 @@ namespace RevitTo3DTiles.Pipeline
     /// 1. 插件程序集同目录（随安装包分发）
     /// 2. 环境变量 MODELTO3DTILES_PATH 指定
     /// 3. 系统PATH
-    /// 参数契约对齐 modelTo3DTiles v2.1.1（2.1.1 仅修复转换器内部贴图缓存坍缩，CLI 未变）：--md 为 BIM 语义 sidecar（.metadata，
+    /// 参数契约对齐 modelTo3DTiles v2.2.0（2.2.0 补写纯实例化瓦片属性表/后处理单趟化，CLI 未变）：--md 为 BIM 语义 sidecar（.metadata，
     /// Elements[].Key 与 glTF 节点 extras.uniqueId 对应），-lla 为度/米制经纬度；
     /// --ts 为单瓦片容量 MB；-r 为绕上轴旋转（度，"x,y,z" 逗号分隔——glb 场景为 Y-up，绕上轴即第二分量 Y）；
     /// -d/--no-d 为 Draco 几何压缩，--ta/--no-ta 为纹理图集合并（均默认开）。
